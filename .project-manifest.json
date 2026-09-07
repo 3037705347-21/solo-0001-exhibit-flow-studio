@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "name": "exhibit-flow-studio",
+  "project_shape": "frontend",
+  "modules": [
+    {"id": "app", "path": "src/app", "responsibility": "routes, application composition, and public page entry points"},
+    {"id": "domain", "path": "src/domain", "responsibility": "entities, validation, transitions, journey analysis, and projections"},
+    {"id": "state", "path": "src/state", "responsibility": "commands, reducer, selectors, sample state, and browser persistence"},
+    {"id": "collection", "path": "src/features/collection", "responsibility": "artifact discovery, filtering, creation, and editing workflow"},
+    {"id": "journey", "path": "src/features/journey", "responsibility": "zone planning, placement transitions, and constraint feedback"},
+    {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, and snapshot export"},
+    {"id": "insights", "path": "src/features/insights", "responsibility": "scenario projection and plan-level analysis"},
+    {"id": "components", "path": "src/components", "responsibility": "shared navigation, dialogs, feedback, charts, and UI primitives"}
+  ],
+  "complexity": {
+    "mechanisms": ["state_transition", "error_propagation", "resource_lifecycle", "validation_boundary", "derived_projection"]
+  },
+  "workflows": [
+    {
+      "id": "curate-object-set",
+      "name": "Curate the object set",
+      "entry": "browser route /collection",
+      "steps": ["filter the collection and open the object editor", "validate and persist a new artifact", "expose the object to the journey planner"],
+      "success": "the validated object appears in the collection and remains after reload",
+      "failure": "field-level errors prevent invalid or duplicate records from being saved",
+      "verification": "Playwright creates an object through the collection route and verifies its persisted card",
+      "module_ids": ["app", "collection", "state", "domain", "components"]
+    },
+    {
+      "id": "build-visitor-journey",
+      "name": "Build and validate the visitor journey",
+      "entry": "browser route /journey",
+      "steps": ["select an unplaced artifact", "place or move it through a state command", "recalculate and display journey constraints"],
+      "success": "the artifact appears in the target zone and updated metrics are visible",
+      "failure": "invalid placement is rejected and an actionable constraint message remains visible",
+      "verification": "Playwright assigns an object to a zone and verifies placement and recalculated analysis",
+      "module_ids": ["app", "journey", "state", "domain", "components"]
+    },
+    {
+      "id": "review-to-readiness",
+      "name": "Run a review to readiness",
+      "entry": "browser route /review",
+      "steps": ["create a linked review finding", "advance the finding through allowed states", "run readiness rules and export a snapshot when eligible"],
+      "success": "resolved findings are recorded and readiness shows a stable outcome",
+      "failure": "illegal transitions and unresolved blockers prevent ready state and snapshot export",
+      "verification": "Playwright creates, advances, and resolves a finding, then runs the readiness check",
+      "module_ids": ["app", "review", "state", "domain", "components"]
+    },
+    {
+      "id": "compare-scenarios",
+      "name": "Compare planning scenarios",
+      "entry": "browser route /insights",
+      "steps": ["adjust pace and accessibility controls", "derive a non-mutating projection", "apply selected planning preferences explicitly"],
+      "success": "projection metrics update and applied preferences persist",
+      "failure": "out-of-range inputs are constrained and baseline state remains intact",
+      "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
+      "module_ids": ["app", "insights", "state", "domain", "components"]
+    }
+  ]
+}
