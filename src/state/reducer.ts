@@ -86,6 +86,9 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       }));
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
+    case 'project/settings':
+      // Project metadata never alters readiness, artifacts, zones, issues, or preferences.
+      return stamp({ ...state, project: { ...state.project, ...action.settings } });
     case 'project/readiness':
       return stamp({
         ...state,

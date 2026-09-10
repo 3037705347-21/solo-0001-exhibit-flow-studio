@@ -9,5 +9,6 @@ export type WorkspaceAction =
   | { type: 'issue/add'; issue: ReviewIssue }
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
+  | { type: 'project/settings'; settings: Pick<WorkspaceState['project'], 'title' | 'venue' | 'audience' | 'openingDate'> }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
   | { type: 'workspace/reset'; state: WorkspaceState };

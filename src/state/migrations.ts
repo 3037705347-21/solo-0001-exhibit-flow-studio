@@ -1,3 +1,4 @@
+import { normalizeProject } from '../domain/projectSettings';
 import type { WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
@@ -34,7 +35,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
   }));
   return {
     version: 1,
-    project: source.project,
+    project: normalizeProject(source.project as WorkspaceState['project']),
     artifacts: source.artifacts,
     zones,
     issues: source.issues,

@@ -87,6 +87,13 @@ export interface WorkspaceState {
   lastSavedAt?: string;
 }
 
+export interface ProjectSettingsDraft {
+  title: string;
+  venue: string;
+  audience: string;
+  openingDate: string;
+}
+
 export interface ArtifactDraft {
   accessionId: string;
   title: string;

@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { projectSettingsFromDraft, validateProjectSettings } from '../domain/projectSettings';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ProjectSettingsDraft, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -26,6 +27,7 @@ interface WorkspaceContextValue {
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
+  updateProjectSettings: (draft: ProjectSettingsDraft) => CommandResult;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
@@ -122,6 +124,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'preferences/update', preferences });
   }, []);
 
+  const updateProjectSettings = useCallback((draft: ProjectSettingsDraft): CommandResult => {
+    const validation = validateProjectSettings(draft);
+    if (validation.length) {
+      return {
+        ok: false,
+        errors: Object.fromEntries(validation.map((error) => [error.field, error.message])),
+        message: 'Review the highlighted fields before saving.',
+      };
+    }
+    dispatch({ type: 'project/settings', settings: projectSettingsFromDraft(draft) });
+    return { ok: true };
+  }, []);
+
   const checkReadiness = useCallback(() => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const result = evaluateReadiness(state, analysis);
@@ -149,10 +164,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     addIssue,
     transitionReviewIssue,
     updatePreferences,
+    updateProjectSettings,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, updateProjectSettings, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
