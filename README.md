@@ -16,8 +16,8 @@ Open `http://127.0.0.1:4173`. The app uses the browser's local storage key `exhi
 ```bash
 npm run lint          # ESLint (typescript-eslint + react-hooks) over the whole repo
 npm run lint:fix      # ESLint with autofix
-npm run format        # Prettier write
-npm run format:check  # Prettier check (no writes)
+npm run format        # Prettier write on files changed in the working tree (git status)
+npm run format:check  # Prettier check on files changed in the working tree
 npm run typecheck     # tsc project references, no emit
 npm run check:fast    # lint + typecheck + unit tests, no browser needed
 npm run build         # TypeScript and Vite production build
@@ -30,7 +30,7 @@ npm run check         # check:fast + build + e2e (full gate, use in CI)
 
 A Husky pre-commit hook runs on every `git commit`:
 
-1. `lint-staged` auto-fixes ESLint and Prettier issues in the staged files and re-stages them. Formatting is enforced incrementally here: the existing codebase was not reformatted wholesale, so files adopt the Prettier style the first time you touch them.
+1. `lint-staged` auto-fixes ESLint and Prettier issues in the staged files and re-stages them. Formatting is enforced incrementally here: the existing codebase was not reformatted wholesale, so `npm run format` / `npm run format:check` only cover files changed in the working tree, and files adopt the Prettier style the first time you touch them.
 2. `npm run check:fast` must pass — lint, type check, and unit tests. Playwright is intentionally not part of the commit gate; it runs in `npm run check` / CI.
 
 If the hook fails, the commit is rejected and the failing command's output (ESLint errors, Prettier file list, `tsc` errors, or the Vitest failure summary) is printed directly in the terminal. Fix the problem — or run `npm run lint:fix && npm run format` — and commit again. For a genuine emergency you can bypass the hook once with `git commit --no-verify`; the full gate still runs in CI, so the bypass only defers the failure.
