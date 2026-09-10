@@ -1,6 +1,11 @@
 import type { Artifact, NarrativeRole } from './models';
 
-export interface CollectionFacet { label: string; value: string; count: number; color?: string }
+export interface CollectionFacet {
+  label: string;
+  value: string;
+  count: number;
+  color?: string;
+}
 export interface CollectionInsights {
   total: number;
   keyCount: number;
@@ -41,7 +46,10 @@ export function summarizeCollection(artifacts: Artifact[]): CollectionInsights {
     totalMinutes,
     averageMinutes: artifacts.length ? totalMinutes / artifacts.length : 0,
     makers: facets(artifacts.map((artifact) => artifact.maker)),
-    roles: facets(artifacts.map((artifact) => artifact.narrativeRole), roleColors),
+    roles: facets(
+      artifacts.map((artifact) => artifact.narrativeRole),
+      roleColors,
+    ),
     sensitivities: facets(artifacts.map((artifact) => artifact.sensitivity)),
     decades: facets(artifacts.map((artifact) => decade(artifact.yearLabel))),
     tagCloud: facets(artifacts.flatMap((artifact) => artifact.tags)),
@@ -52,20 +60,38 @@ export function searchArtifacts(artifacts: Artifact[], query: string): Artifact[
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return artifacts;
   return artifacts.filter((artifact) => {
-    const fields = [artifact.title, artifact.maker, artifact.accessionId, artifact.medium, artifact.origin, artifact.summary, ...artifact.tags];
+    const fields = [
+      artifact.title,
+      artifact.maker,
+      artifact.accessionId,
+      artifact.medium,
+      artifact.origin,
+      artifact.summary,
+      ...artifact.tags,
+    ];
     return fields.some((field) => field.toLocaleLowerCase().includes(normalized));
   });
 }
 
-export function sortArtifacts(artifacts: Artifact[], sort: 'title' | 'dwell' | 'recent' | 'role'): Artifact[] {
+export function sortArtifacts(
+  artifacts: Artifact[],
+  sort: 'title' | 'dwell' | 'recent' | 'role',
+): Artifact[] {
   return [...artifacts].sort((left, right) => {
     if (sort === 'title') return left.title.localeCompare(right.title);
     if (sort === 'dwell') return right.dwellMinutes - left.dwellMinutes;
     if (sort === 'recent') return right.updatedAt.localeCompare(left.updatedAt);
-    return left.narrativeRole.localeCompare(right.narrativeRole) || left.title.localeCompare(right.title);
+    return (
+      left.narrativeRole.localeCompare(right.narrativeRole) || left.title.localeCompare(right.title)
+    );
   });
 }
 
-export function filterByAccessibility(artifacts: Artifact[], need: Artifact['accessibilityNeed'] | 'all'): Artifact[] {
-  return need === 'all' ? artifacts : artifacts.filter((artifact) => artifact.accessibilityNeed === need);
+export function filterByAccessibility(
+  artifacts: Artifact[],
+  need: Artifact['accessibilityNeed'] | 'all',
+): Artifact[] {
+  return need === 'all'
+    ? artifacts
+    : artifacts.filter((artifact) => artifact.accessibilityNeed === need);
 }

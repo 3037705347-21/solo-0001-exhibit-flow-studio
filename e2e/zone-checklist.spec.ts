@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-test('filter by zone, download the floor checklist, and keep the filter after reload', async ({ page }) => {
+test('filter by zone, download the floor checklist, and keep the filter after reload', async ({
+  page,
+}) => {
   await page.goto('/review');
 
   // The floor checklist only appears once a zone is selected.

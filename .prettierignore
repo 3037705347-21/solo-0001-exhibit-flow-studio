@@ -1,0 +1,10 @@
+# Generated output and lockfiles — source directories are always checked.
+dist
+coverage
+playwright-report
+test-results
+package-lock.json
+
+# Machine-managed project metadata (rewritten by tooling, not by hand).
+.project-manifest.json
+.project-runtime.json

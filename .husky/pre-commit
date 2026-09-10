@@ -1,0 +1,5 @@
+# 1. Auto-fix lint/format on staged files only (lint-staged re-stages them).
+# 2. Run the full fast gate: eslint + prettier check + tsc + vitest.
+# Commit is rejected if either step fails. Emergency bypass: git commit --no-verify
+npx lint-staged
+npm run check:fast

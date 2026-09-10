@@ -14,11 +14,37 @@ Open `http://127.0.0.1:4173`. The app uses the browser's local storage key `exhi
 ## Validation commands
 
 ```bash
-npm run build       # TypeScript and Vite production build
-npm run test        # Vitest unit tests
-npm run test:e2e    # Playwright browser workflows
-npm run check       # all checks in sequence
+npm run lint          # ESLint (typescript-eslint + react-hooks) over the whole repo
+npm run lint:fix      # ESLint with autofix
+npm run format        # Prettier write
+npm run format:check  # Prettier check (no writes)
+npm run typecheck     # tsc project references, no emit
+npm run check:fast    # lint + format:check + typecheck + unit tests, no browser needed
+npm run build         # TypeScript and Vite production build
+npm run test          # Vitest unit tests
+npm run test:e2e      # Playwright browser workflows
+npm run check         # check:fast + build + e2e (full gate, use in CI)
 ```
+
+## Commit gate
+
+A Husky pre-commit hook runs on every `git commit`:
+
+1. `lint-staged` auto-fixes ESLint and Prettier issues in the staged files and re-stages them.
+2. `npm run check:fast` must pass — lint, format check, type check, and unit tests. Playwright is intentionally not part of the commit gate; it runs in `npm run check` / CI.
+
+If the hook fails, the commit is rejected and the failing command's output (ESLint errors, Prettier file list, `tsc` errors, or the Vitest failure summary) is printed directly in the terminal. Fix the problem — or run `npm run lint:fix && npm run format` — and commit again. For a genuine emergency you can bypass the hook once with `git commit --no-verify`; the full gate still runs in CI, so the bypass only defers the failure.
+
+## Setup for new contributors
+
+```bash
+npm install                  # installs dependencies and enables the Git hook via the prepare script
+npx playwright install       # only needed for npm run test:e2e / npm run check
+```
+
+On Linux, browser system libraries are also required: `npx playwright install --with-deps chromium` (needs sudo), or use the official Playwright container image in CI.
+
+Node.js 20.19+ (22+ recommended). `jsdom` is pinned to 29.x because 30.x requires Node 22.
 
 ## Directory structure
 

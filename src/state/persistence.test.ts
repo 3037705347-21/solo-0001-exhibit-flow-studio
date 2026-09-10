@@ -9,7 +9,15 @@ describe('workspace persistence', () => {
   });
   it('round trips a workspace through storage', () => {
     const values = new Map<string, string>();
-    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } } as unknown as Storage;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    } as unknown as Storage;
     const state = createSeedWorkspace();
     expect(saveWorkspace(state, storage)).toBe(true);
     expect(values.has(STORAGE_KEY)).toBe(true);

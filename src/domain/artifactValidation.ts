@@ -1,38 +1,57 @@
 import type { Artifact, ArtifactDraft, ValidationError } from './models';
 import { createId, normalizeAccessionId } from './ids';
 
-const REQUIRED_TEXT_FIELDS: Array<keyof Pick<ArtifactDraft, 'accessionId' | 'title' | 'maker' | 'medium' | 'summary'>> = [
-  'accessionId',
-  'title',
-  'maker',
-  'medium',
-  'summary',
-];
+const REQUIRED_TEXT_FIELDS: Array<
+  keyof Pick<ArtifactDraft, 'accessionId' | 'title' | 'maker' | 'medium' | 'summary'>
+> = ['accessionId', 'title', 'maker', 'medium', 'summary'];
 
-function parsePositiveNumber(value: string, field: string, label: string): ValidationError | undefined {
+function parsePositiveNumber(
+  value: string,
+  field: string,
+  label: string,
+): ValidationError | undefined {
   const parsed = Number(value);
   if (!value.trim()) return { field, message: `${label} is required.` };
-  if (!Number.isFinite(parsed) || parsed <= 0) return { field, message: `${label} must be greater than zero.` };
+  if (!Number.isFinite(parsed) || parsed <= 0)
+    return { field, message: `${label} must be greater than zero.` };
   if (parsed > 10000) return { field, message: `${label} is outside the supported range.` };
   return undefined;
 }
 
-export function validateArtifactDraft(draft: ArtifactDraft, artifacts: Artifact[], editingId?: string): ValidationError[] {
+export function validateArtifactDraft(
+  draft: ArtifactDraft,
+  artifacts: Artifact[],
+  editingId?: string,
+): ValidationError[] {
   const errors: ValidationError[] = [];
 
   for (const field of REQUIRED_TEXT_FIELDS) {
     if (!draft[field].trim()) {
-      errors.push({ field, message: `${field === 'accessionId' ? 'Accession ID' : field[0].toUpperCase() + field.slice(1)} is required.` });
+      errors.push({
+        field,
+        message: `${field === 'accessionId' ? 'Accession ID' : field[0].toUpperCase() + field.slice(1)} is required.`,
+      });
     }
   }
 
-  if (draft.title.trim().length > 90) errors.push({ field: 'title', message: 'Title must be 90 characters or fewer.' });
-  if (draft.summary.trim().length < 24) errors.push({ field: 'summary', message: 'Summary must contain at least 24 characters.' });
-  if (draft.summary.trim().length > 500) errors.push({ field: 'summary', message: 'Summary must be 500 characters or fewer.' });
+  if (draft.title.trim().length > 90)
+    errors.push({ field: 'title', message: 'Title must be 90 characters or fewer.' });
+  if (draft.summary.trim().length < 24)
+    errors.push({ field: 'summary', message: 'Summary must contain at least 24 characters.' });
+  if (draft.summary.trim().length > 500)
+    errors.push({ field: 'summary', message: 'Summary must be 500 characters or fewer.' });
 
   const normalized = normalizeAccessionId(draft.accessionId);
-  if (artifacts.some((artifact) => artifact.id !== editingId && normalizeAccessionId(artifact.accessionId) === normalized)) {
-    errors.push({ field: 'accessionId', message: 'This accession ID is already in the collection.' });
+  if (
+    artifacts.some(
+      (artifact) =>
+        artifact.id !== editingId && normalizeAccessionId(artifact.accessionId) === normalized,
+    )
+  ) {
+    errors.push({
+      field: 'accessionId',
+      message: 'This accession ID is already in the collection.',
+    });
   }
 
   const numericChecks = [
@@ -72,7 +91,11 @@ export function artifactFromDraft(draft: ArtifactDraft, existing?: Artifact): Ar
     sensitivity: draft.sensitivity,
     accessibilityNeed: draft.accessibilityNeed,
     isKeyObject: draft.isKeyObject,
-    tags: draft.tags.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 8),
+    tags: draft.tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .slice(0, 8),
     color: draft.color,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,

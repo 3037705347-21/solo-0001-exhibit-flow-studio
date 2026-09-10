@@ -22,7 +22,9 @@ export function buildVisitorPath(zones: Zone[], artifacts: Artifact[]): VisitorP
   const nodes = [...zones]
     .sort((left, right) => left.sequence - right.sequence)
     .map((zone, index, all) => {
-      const placed = zone.artifactIds.map((id) => artifactMap.get(id)).filter((artifact): artifact is Artifact => Boolean(artifact));
+      const placed = zone.artifactIds
+        .map((id) => artifactMap.get(id))
+        .filter((artifact): artifact is Artifact => Boolean(artifact));
       const dwellMinutes = placed.reduce((sum, artifact) => sum + artifact.dwellMinutes, 0);
       const previous = all[index - 1];
       return {
@@ -51,6 +53,8 @@ export function getPathProgress(path: VisitorPathSummary, zoneId: string): numbe
 
 export function estimateExitTime(path: VisitorPathSummary, start: Date, pauseMinutes = 0): Date {
   const exit = new Date(start);
-  exit.setMinutes(exit.getMinutes() + path.totalMinutes + path.handoffCount + Math.max(0, pauseMinutes));
+  exit.setMinutes(
+    exit.getMinutes() + path.totalMinutes + path.handoffCount + Math.max(0, pauseMinutes),
+  );
   return exit;
 }

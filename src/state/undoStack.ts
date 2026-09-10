@@ -43,5 +43,9 @@ export function redoHistory(history: WorkspaceHistory): WorkspaceHistory {
   };
 }
 
-export function canUndo(history: WorkspaceHistory): boolean { return history.past.length > 0; }
-export function canRedo(history: WorkspaceHistory): boolean { return history.future.length > 0; }
+export function canUndo(history: WorkspaceHistory): boolean {
+  return history.past.length > 0;
+}
+export function canRedo(history: WorkspaceHistory): boolean {
+  return history.future.length > 0;
+}

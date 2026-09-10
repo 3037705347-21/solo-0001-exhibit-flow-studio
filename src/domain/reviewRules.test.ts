@@ -12,7 +12,10 @@ describe('readiness rules', () => {
   });
   it('passes when the critical finding and all journey blockers are resolved', () => {
     const state = createSeedWorkspace();
-    const clean = { ...state, issues: state.issues.map((issue) => ({ ...issue, status: 'resolved' as const })) };
+    const clean = {
+      ...state,
+      issues: state.issues.map((issue) => ({ ...issue, status: 'resolved' as const })),
+    };
     const readiness = evaluateReadiness(clean, analyzeJourney(clean.artifacts, clean.zones));
     expect(readiness.ready).toBe(true);
   });

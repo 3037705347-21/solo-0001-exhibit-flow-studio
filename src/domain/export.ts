@@ -13,14 +13,24 @@ export function parseSnapshot(raw: string): Snapshot | null {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object') return null;
     const candidate = value as Partial<Snapshot>;
-    if (candidate.schemaVersion !== 1 || !candidate.project || !candidate.summary || !Array.isArray(candidate.zones)) return null;
+    if (
+      candidate.schemaVersion !== 1 ||
+      !candidate.project ||
+      !candidate.summary ||
+      !Array.isArray(candidate.zones)
+    )
+      return null;
     return value as Snapshot;
   } catch {
     return null;
   }
 }
 
-export function downloadTextFile(contents: string, fileName: string, mimeType = 'application/json'): void {
+export function downloadTextFile(
+  contents: string,
+  fileName: string,
+  mimeType = 'application/json',
+): void {
   const blob = new Blob([contents], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

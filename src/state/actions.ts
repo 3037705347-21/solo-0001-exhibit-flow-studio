@@ -1,4 +1,10 @@
-import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
+import type {
+  Artifact,
+  IssueStatus,
+  PlanningPreferences,
+  ReviewIssue,
+  WorkspaceState,
+} from '../domain/models';
 
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
