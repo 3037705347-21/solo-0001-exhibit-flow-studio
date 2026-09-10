@@ -11,6 +11,10 @@ npm run dev
 
 Open `http://127.0.0.1:4173`. The app uses the browser's local storage key `exhibit-flow.workspace.v1`; no network services or environment variables are required. Use **Reset sample plan** in the sidebar to restore the built-in exhibition.
 
+## Operation history
+
+Every workspace-changing command (object edits, zone placement and sequencing, finding creation and transitions, applied preferences, readiness checks, and sample resets) is appended to an independent audit trail shown on the **History** page (`/history`). Entries show a summary, their source area, and time, newest first. The trail is stored under its own key, `exhibit-flow.activity-history.v1`, so it survives refreshes and sample resets without ever touching plan data or command results. Only the newest 100 commands are kept; older events roll off automatically.
+
 ## Validation commands
 
 ```bash
