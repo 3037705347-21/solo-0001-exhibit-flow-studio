@@ -12,6 +12,9 @@ export function describeAction(action: WorkspaceAction): string {
   switch (action.type) {
     case 'artifact/upsert': return `Saved object ${action.artifact.accessionId}`;
     case 'artifact/remove': return `Removed object ${action.artifactId}`;
+    case 'zone/upsert': return `Saved zone ${action.zone.name}`;
+    case 'zone/remove': return `Removed zone ${action.zoneId}`;
+    case 'zone/reorder': return 'Changed zone sequence';
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;

@@ -52,6 +52,41 @@ function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: stri
   };
 }
 
+function removeZone(state: WorkspaceState, zoneId: string): WorkspaceState {
+  const zone = state.zones.find((candidate) => candidate.id === zoneId);
+  if (!zone) throw new Error('The selected zone no longer exists.');
+  return {
+    ...state,
+    zones: state.zones
+      .filter((candidate) => candidate.id !== zoneId)
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((candidate, index) => ({ ...candidate, sequence: index })),
+    issues: state.issues.map((issue) => {
+      if (issue.zoneId !== zoneId) return issue;
+      if (issue.artifactId) return { ...issue, zoneId: undefined };
+      return { ...issue, zoneId: undefined, detachedFromZone: zone.name };
+    }),
+  };
+}
+
+function reorderZone(state: WorkspaceState, zoneId: string, direction: -1 | 1): WorkspaceState {
+  const ordered = [...state.zones].sort((left, right) => left.sequence - right.sequence);
+  const currentIndex = ordered.findIndex((zone) => zone.id === zoneId);
+  if (currentIndex === -1) throw new Error('The zone could not be found.');
+  const targetIndex = currentIndex + direction;
+  if (targetIndex < 0 || targetIndex >= ordered.length) return state;
+  const reordered = [...ordered];
+  [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+  const sequenceById = new Map<string, number>(reordered.map((zone, index) => [zone.id, index]));
+  return {
+    ...state,
+    zones: state.zones.map((zone) => {
+      const sequence = sequenceById.get(zone.id);
+      return sequence === undefined ? zone : { ...zone, sequence };
+    }),
+  };
+}
+
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
     case 'artifact/upsert': {
@@ -69,6 +104,18 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
       }));
     }
+    case 'zone/upsert': {
+      const exists = state.zones.some((zone) => zone.id === action.zone.id);
+      if (!exists) return stamp(regressReadyProject({ ...state, zones: [...state.zones, action.zone] }));
+      return stamp(regressReadyProject({
+        ...state,
+        zones: state.zones.map((zone) => (zone.id === action.zone.id ? action.zone : zone)),
+      }));
+    }
+    case 'zone/remove':
+      return stamp(regressReadyProject(removeZone(state, action.zoneId)));
+    case 'zone/reorder':
+      return stamp(regressReadyProject(reorderZone(state, action.zoneId, action.direction)));
     case 'placement/assign':
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
     case 'placement/remove':

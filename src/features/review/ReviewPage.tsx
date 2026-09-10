@@ -35,6 +35,12 @@ export function ReviewPage() {
 
   const zones = useMemo(() => sortZones(state.zones), [state.zones]);
   const selectedZone = zones.find((zone) => zone.id === reviewUi.zoneId);
+
+  // If a zone filter points at a deleted zone, fall back to the overview and persist the reset.
+  useEffect(() => {
+    if (reviewUi.zoneId && !selectedZone) setReviewUi((ui) => ({ ...ui, zoneId: '' }));
+  }, [reviewUi.zoneId, selectedZone]);
+
   const filter = reviewUi.status;
 
   const scopedIssues = useMemo<ReviewIssue[]>(() => {
@@ -50,6 +56,7 @@ export function ReviewPage() {
     resolved: scopedIssues.filter((issue) => issue.status === 'resolved').length,
   };
   const filtered = scopedIssues.filter((issue) => filter === 'all' || issue.status === filter);
+  const detachedFindings = selectedZone ? [] : state.issues.filter((issue) => issue.detachedFromZone && !issue.zoneId);
   const checklist = selectedZone ? buildZoneChecklist(state, selectedZone.id) : null;
 
   const runCheck = () => setReadiness(checkReadiness());
@@ -68,11 +75,12 @@ export function ReviewPage() {
   return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
     <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
     {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
+    {detachedFindings.length > 0 && !selectedZone && <section className="detached-banner" role="status"><AlertCircle size={16} /><span><strong>{detachedFindings.length} finding{detachedFindings.length === 1 ? '' : 's'} from removed zone{detachedFindings.length === 1 ? '' : 's'}</strong> — kept on the desk as detached findings; relink or resolve them.</span></section>}
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
     <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
     {checklist && <ZoneChecklistCard checklist={checklist} onDownload={exportChecklist} />}
-    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
+    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} zones={zones} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
@@ -93,12 +101,13 @@ function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<R
   </section>;
 }
 
-function IssueRow({ issue, onTransition }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
+function IssueRow({ issue, zones, onTransition }: { issue: ReviewIssue; zones: ReturnType<typeof useWorkspace>['state']['zones']; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
   const [error, setError] = useState<string | null>(null);
+  const linkedZone = issue.zoneId ? zones.find((zone) => zone.id === issue.zoneId) : undefined;
   const next = issue.status === 'open' ? 'in-progress' : issue.status === 'in-progress' ? 'resolved' : 'in-progress';
   const resultLabel = issue.status === 'open' ? 'Start work' : issue.status === 'in-progress' ? 'Resolve' : 'Reopen';
   const result = () => { const response = onTransition(next); if (!response.ok) { setError(response.message ?? 'Transition failed.'); window.setTimeout(() => setError(null), 2500); } };
-  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
+  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge>{issue.detachedFromZone && <Badge tone="neutral">{issue.detachedFromZone} · zone removed</Badge>}</div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{linkedZone && <span><MapPin size={13} /> {linkedZone.name}</span>}{issue.detachedFromZone && !linkedZone && <span><MapPin size={13} /> Former zone: {issue.detachedFromZone}</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
 }
 
 function IssueEditor({ state, onClose, onSave }: { state: ReturnType<typeof useWorkspace>['state']; onClose: () => void; onSave: (draft: IssueDraft) => { ok: boolean; errors?: Record<string, string> } }) {

@@ -7,6 +7,7 @@
     {"id": "domain", "path": "src/domain", "responsibility": "entities, validation, transitions, journey analysis, and projections"},
     {"id": "state", "path": "src/state", "responsibility": "commands, reducer, selectors, sample state, and browser persistence"},
     {"id": "collection", "path": "src/features/collection", "responsibility": "artifact discovery, filtering, creation, and editing workflow"},
+    {"id": "zones", "path": "src/features/zones", "responsibility": "exhibition zone configuration, sequencing, and deletion impact workflow"},
     {"id": "journey", "path": "src/features/journey", "responsibility": "zone planning, placement transitions, and constraint feedback"},
     {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, and snapshot export"},
     {"id": "insights", "path": "src/features/insights", "responsibility": "scenario projection and plan-level analysis"},
@@ -25,6 +26,16 @@
       "failure": "field-level errors prevent invalid or duplicate records from being saved",
       "verification": "Playwright creates an object through the collection route and verifies its persisted card",
       "module_ids": ["app", "collection", "state", "domain", "components"]
+    },
+    {
+      "id": "configure-exhibition-zones",
+      "name": "Configure exhibition zones",
+      "entry": "browser route /zones",
+      "steps": ["create or edit a zone with name, short label, theme, capacity, object limit, light, seating, and color", "reorder zones or delete a zone after reviewing its impact", "new zones participate in journey placement and review filtering"],
+      "success": "zone changes persist after reload and placements, findings, and the unplaced queue stay consistent",
+      "failure": "invalid zone fields are rejected and deleting a non-empty zone requires confirming the listed impact",
+      "verification": "Playwright creates a zone, over-tightens capacity, deletes a non-empty zone, and verifies sequence persistence",
+      "module_ids": ["app", "zones", "state", "domain", "components"]
     },
     {
       "id": "build-visitor-journey",

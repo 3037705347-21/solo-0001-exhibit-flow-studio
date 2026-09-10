@@ -2,8 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { planZoneDelete } from '../domain/zoneRemoval';
+import { validateZoneDraft } from '../domain/zoneValidation';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState, Zone, ZoneDraft } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -20,6 +22,10 @@ interface WorkspaceContextValue {
   storageHealthy: boolean;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
+  upsertZone: (draft: ZoneDraft, existing?: Zone) => CommandResult<Zone>;
+  removeZone: (zoneId: string) => CommandResult;
+  reorderZone: (zoneId: string, direction: -1 | 1) => CommandResult;
+  planZoneRemoval: (zoneId: string) => NonNullable<ReturnType<typeof planZoneDelete>> | null;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
@@ -61,6 +67,63 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'artifact/remove', artifactId });
     return { ok: true };
   }, [state.artifacts]);
+
+  const upsertZone = useCallback((draft: ZoneDraft, existing?: Zone): CommandResult<Zone> => {
+    const validation = validateZoneDraft(draft, state.zones, existing?.id);
+    if (validation.length) {
+      return {
+        ok: false,
+        errors: Object.fromEntries(validation.map((error) => [error.field, error.message])),
+        message: 'Review the highlighted fields before saving.',
+      };
+    }
+    const zone: Zone = existing
+      ? {
+          ...existing,
+          name: draft.name.trim(),
+          shortLabel: draft.shortLabel.trim(),
+          thesis: draft.thesis.trim(),
+          capacityMinutes: Number(draft.capacityMinutes),
+          maxObjects: Number(draft.maxObjects),
+          lowLight: draft.lowLight,
+          hasSeating: draft.hasSeating,
+          color: draft.color.trim(),
+        }
+      : {
+          id: createId('zone'),
+          name: draft.name.trim(),
+          shortLabel: draft.shortLabel.trim(),
+          thesis: draft.thesis.trim(),
+          capacityMinutes: Number(draft.capacityMinutes),
+          maxObjects: Number(draft.maxObjects),
+          lowLight: draft.lowLight,
+          hasSeating: draft.hasSeating,
+          color: draft.color.trim(),
+          sequence: state.zones.reduce((max, candidate) => Math.max(max, candidate.sequence + 1), 0),
+          artifactIds: [],
+        };
+    dispatch({ type: 'zone/upsert', zone });
+    return { ok: true, value: zone };
+  }, [state.zones]);
+
+  const removeZone = useCallback((zoneId: string): CommandResult => {
+    if (!state.zones.some((zone) => zone.id === zoneId)) {
+      return { ok: false, message: 'The selected zone no longer exists.' };
+    }
+    dispatch({ type: 'zone/remove', zoneId });
+    return { ok: true };
+  }, [state.zones]);
+
+  const reorderZone = useCallback((zoneId: string, direction: -1 | 1): CommandResult => {
+    try {
+      dispatch({ type: 'zone/reorder', zoneId, direction });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Zone order could not be changed.' };
+    }
+  }, []);
+
+  const planZoneRemoval = useCallback((zoneId: string) => planZoneDelete(state, zoneId), [state]);
 
   const assignArtifact = useCallback((artifactId: string, zoneId: string): CommandResult => {
     try {
@@ -143,6 +206,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     storageHealthy,
     upsertArtifact,
     removeArtifact,
+    upsertZone,
+    removeZone,
+    reorderZone,
+    planZoneRemoval,
     assignArtifact,
     removePlacement,
     reorderArtifact,
@@ -152,7 +219,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, upsertZone, removeZone, reorderZone, planZoneRemoval, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

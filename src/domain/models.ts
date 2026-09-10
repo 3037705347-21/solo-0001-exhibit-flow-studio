@@ -55,10 +55,22 @@ export interface ReviewIssue {
   status: IssueStatus;
   zoneId?: string;
   artifactId?: string;
+  detachedFromZone?: string;
   owner: string;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+
+export interface ZoneDraft {
+  name: string;
+  shortLabel: string;
+  thesis: string;
+  capacityMinutes: string;
+  maxObjects: string;
+  lowLight: boolean;
+  hasSeating: boolean;
+  color: string;
 }
 
 export interface PlanningPreferences {

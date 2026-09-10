@@ -25,6 +25,7 @@ npm run check       # all checks in sequence
 - `src/domain`: entities, validation boundaries, journey analysis, state transitions, readiness, and scenario projection.
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
 - `src/features/collection`: searchable object library and validated editor.
+- `src/features/zones`: exhibition zone configuration (name, short label, theme, capacity, object limit, light, seating, color), sequencing, and impact-checked deletion.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
 - `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.

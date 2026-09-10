@@ -27,21 +27,27 @@ The application is a pure frontend project. It does not require accounts, a serv
 
 The user opens the collection view, searches and filters existing objects, adds an object through a validated editor, and sees it enter the collection. Duplicate accession identifiers, missing titles, invalid dimensions, and invalid dwell times are rejected with field-level messages. The created object is persisted in local storage and becomes immediately available to the journey planner.
 
-### 2. Build and validate the visitor journey
+### 2. Configure exhibition zones
+
+The user opens the zones view, creates a new zone with a name, short label, theme, dwell capacity, maximum object count, low-light and seating flags, and a color, or edits and reorders existing zones. New zones participate in journey placement checks and review filtering immediately; tightening capacity never deletes placements, it surfaces blocking constraints. Deleting a non-empty zone previews the affected objects and findings, then returns its objects to the unplaced queue while keeping zone-level findings as detached findings.
+
+### 3. Build and validate the visitor journey
 
 The user opens the journey view, assigns unplaced objects to zones, changes placement sequence, and moves objects between zones. The domain engine recalculates zone dwell time, density, narrative coverage, and accessibility constraints after every transition. A validation panel exposes blocking errors and warnings, and links findings back to affected zones.
 
-### 3. Run a review to readiness
+### 4. Run a review to readiness
 
 The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
 
-### 4. Compare planning scenarios
+### 5. Compare planning scenarios
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
 
 ## State and rules
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
+- Zone names are unique and trimmed; capacity and maximum object count must be positive whole numbers.
+- Deleting a zone removes no objects and no findings: placed objects return to the unplaced queue, object findings keep their object link, and zone-level findings are retained as detached findings labeled with the removed zone.
 - Artifact accession identifiers are normalized and unique.
 - Every artifact must have a positive dwell time and valid physical dimensions.
 - A zone warns above 80% of its dwell capacity and blocks above 100%.
@@ -56,14 +62,14 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - `app`: application composition, routing, shell, providers, and page entry points.
 - `domain`: entity types, validation, state transitions, journey analysis, readiness rules, and scenario projections.
 - `state`: reducer, commands, persistence adapter, seed data, and selectors.
-- `features`: collection, journey, review, and insights vertical slices using public state commands.
+- `features`: collection, zones, journey, review, and insights vertical slices using public state commands.
 - `components`: reusable interface primitives, charts, navigation, feedback, and modal infrastructure.
 
 Feature pages call state commands. State commands validate through the domain module before updating and persisting state. Derived selectors call pure domain analysis functions. Components do not mutate domain state directly.
 
 ## Public interfaces
 
-- Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
+- Browser routes: `/collection`, `/zones`, `/journey`, `/review`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
 - Local persistence key: `exhibit-flow.workspace.v1`.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.

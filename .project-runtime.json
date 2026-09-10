@@ -6,6 +6,7 @@
   "test_command": "npm run test",
   "workflow_checks": [
     {"workflow_id": "curate-object-set", "command": "npx playwright test e2e/collection.spec.ts"},
+    {"workflow_id": "configure-exhibition-zones", "command": "npx playwright test e2e/zones.spec.ts"},
     {"workflow_id": "build-visitor-journey", "command": "npx playwright test e2e/journey.spec.ts"},
     {"workflow_id": "review-to-readiness", "command": "npx playwright test e2e/review.spec.ts"},
     {"workflow_id": "compare-scenarios", "command": "npx playwright test e2e/insights.spec.ts"}

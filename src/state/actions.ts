@@ -1,8 +1,11 @@
-import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
+import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState, Zone } from '../domain/models';
 
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
   | { type: 'artifact/remove'; artifactId: string }
+  | { type: 'zone/upsert'; zone: Zone }
+  | { type: 'zone/remove'; zoneId: string }
+  | { type: 'zone/reorder'; zoneId: string; direction: -1 | 1 }
   | { type: 'placement/assign'; artifactId: string; zoneId: string; index?: number }
   | { type: 'placement/remove'; artifactId: string }
   | { type: 'placement/reorder'; zoneId: string; artifactId: string; direction: -1 | 1 }
