@@ -34,8 +34,6 @@ export function selectWorkspaceSummary(state: WorkspaceState) {
     unplacedArtifacts: getUnplacedArtifacts(state.artifacts, state.zones),
     issueProgress: issueProgress(state.issues),
     openIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
-    criticalIssues: state.issues.filter(
-      (issue) => issue.severity === 'critical' && issue.status !== 'resolved',
-    ),
+    criticalIssues: state.issues.filter((issue) => issue.severity === 'critical' && issue.status !== 'resolved'),
   };
 }

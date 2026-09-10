@@ -34,25 +34,15 @@ export interface ZoneChecklist {
   entries: ZoneChecklistEntry[];
 }
 
-export function buildZoneChecklist(
-  state: WorkspaceState,
-  zoneId: string,
-  at = new Date(),
-): ZoneChecklist | null {
+export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = new Date()): ZoneChecklist | null {
   const zone = sortZones(state.zones).find((candidate) => candidate.id === zoneId);
   if (!zone) return null;
 
   const artifactById = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
   const unresolved = state.issues.filter((issue) => issue.status !== 'resolved');
 
-  const toFinding =
-    (scope: 'object' | 'zone') =>
-    (issue: {
-      severity: IssueSeverity;
-      status: IssueStatus;
-      title: string;
-      owner: string;
-    }): ChecklistFinding => ({
+  const toFinding = (scope: 'object' | 'zone') =>
+    (issue: { severity: IssueSeverity; status: IssueStatus; title: string; owner: string }): ChecklistFinding => ({
       severity: issue.severity,
       status: issue.status,
       title: issue.title,
@@ -71,10 +61,7 @@ export function buildZoneChecklist(
       if (!artifact) return null;
       const objectFindings = unresolved
         .filter((issue) => issue.artifactId === artifact.id)
-        .map((issue) => {
-          linkedIssueIds.add(issue.id);
-          return toFinding('object')(issue);
-        });
+        .map((issue) => { linkedIssueIds.add(issue.id); return toFinding('object')(issue); });
       return {
         sequence: index + 1,
         artifactId: artifact.id,
@@ -136,25 +123,17 @@ export function serializeZoneChecklistCsv(checklist: ZoneChecklist): string {
     `Thesis,${csvCell(checklist.thesis)}`,
     `Generated,${csvCell(checklist.generatedAt)}`,
     '',
-    ['Order', 'Accession ID', 'Object', 'Dwell (min)', 'Unresolved findings']
-      .map(csvCell)
-      .join(','),
+    ['Order', 'Accession ID', 'Object', 'Dwell (min)', 'Unresolved findings'].map(csvCell).join(','),
   ];
 
   for (const entry of checklist.entries) {
     const findings = entry.unresolvedFindings.map(formatFinding).join(' | ');
-    lines.push(
-      [entry.sequence, entry.accessionId, entry.title, entry.dwellMinutes, findings]
-        .map(csvCell)
-        .join(','),
-    );
+    lines.push([entry.sequence, entry.accessionId, entry.title, entry.dwellMinutes, findings].map(csvCell).join(','));
   }
 
   lines.push(
     '',
-    csvCell(
-      `Total dwell: ${formatMinutes(checklist.totalDwellMinutes)} | Objects: ${checklist.objectCount} | Unresolved findings: ${checklist.unresolvedCount}`,
-    ),
+    csvCell(`Total dwell: ${formatMinutes(checklist.totalDwellMinutes)} | Objects: ${checklist.objectCount} | Unresolved findings: ${checklist.unresolvedCount}`),
   );
 
   return lines.join('\r\n');

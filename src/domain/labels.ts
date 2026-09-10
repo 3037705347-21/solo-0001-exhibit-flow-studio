@@ -1,10 +1,4 @@
-import type {
-  AccessibilityNeed,
-  IssueSeverity,
-  IssueStatus,
-  NarrativeRole,
-  Sensitivity,
-} from './models';
+import type { AccessibilityNeed, IssueSeverity, IssueStatus, NarrativeRole, Sensitivity } from './models';
 
 export const roleDescriptions: Record<NarrativeRole, string> = {
   threshold: 'Introduces the visitor to the exhibition question.',
@@ -38,21 +32,9 @@ export const accessibilityDescriptions: Record<AccessibilityNeed, string> = {
   'tactile-alternative': 'Provide a tactile or material alternative.',
 };
 
-export function describeRole(role: NarrativeRole): string {
-  return roleDescriptions[role];
-}
-export function describeSeverity(severity: IssueSeverity): string {
-  return severityDescriptions[severity];
-}
-export function describeStatus(status: IssueStatus): string {
-  return statusDescriptions[status];
-}
-export function describeSensitivity(value: Sensitivity): string {
-  return sensitivityDescriptions[value];
-}
-export function describeAccessibility(value: AccessibilityNeed): string {
-  return accessibilityDescriptions[value];
-}
-export function isBlockingSeverity(value: IssueSeverity): boolean {
-  return value === 'critical';
-}
+export function describeRole(role: NarrativeRole): string { return roleDescriptions[role]; }
+export function describeSeverity(severity: IssueSeverity): string { return severityDescriptions[severity]; }
+export function describeStatus(status: IssueStatus): string { return statusDescriptions[status]; }
+export function describeSensitivity(value: Sensitivity): string { return sensitivityDescriptions[value]; }
+export function describeAccessibility(value: AccessibilityNeed): string { return accessibilityDescriptions[value]; }
+export function isBlockingSeverity(value: IssueSeverity): boolean { return value === 'critical'; }

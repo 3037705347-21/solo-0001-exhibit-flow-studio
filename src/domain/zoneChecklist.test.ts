@@ -1,20 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { ReviewIssue, WorkspaceState } from './models';
 import { createSeedWorkspace } from '../state/seed';
-import {
-  buildZoneChecklist,
-  serializeZoneChecklistCsv,
-  zoneChecklistFileName,
-} from './zoneChecklist';
+import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from './zoneChecklist';
 
 function stateWithIssues(extra: ReviewIssue[]): WorkspaceState {
   const seed = createSeedWorkspace();
   return { ...seed, issues: [...seed.issues, ...extra] };
 }
 
-function issue(
-  overrides: Partial<ReviewIssue> & Pick<ReviewIssue, 'id' | 'title' | 'zoneId'>,
-): ReviewIssue {
+function issue(overrides: Partial<ReviewIssue> & Pick<ReviewIssue, 'id' | 'title' | 'zoneId'>): ReviewIssue {
   return {
     description: 'Enough context for a review finding used in tests.',
     severity: 'warning',
@@ -36,10 +30,7 @@ describe('buildZoneChecklist', () => {
     const checklist = buildZoneChecklist(createSeedWorkspace(), 'zone-common');
     expect(checklist).not.toBeNull();
     expect(checklist!.objectCount).toBe(2);
-    expect(checklist!.entries.map((entry) => entry.title)).toEqual([
-      'Portable Letterpress',
-      'Rain Map Quilt',
-    ]);
+    expect(checklist!.entries.map((entry) => entry.title)).toEqual(['Portable Letterpress', 'Rain Map Quilt']);
     expect(checklist!.entries.map((entry) => entry.sequence)).toEqual([1, 2]);
     expect(checklist!.entries.map((entry) => entry.dwellMinutes)).toEqual([7, 8]);
     expect(checklist!.totalDwellMinutes).toBe(15);
@@ -47,27 +38,14 @@ describe('buildZoneChecklist', () => {
 
   it('includes unresolved object findings but excludes resolved ones', () => {
     const state = stateWithIssues([
-      issue({
-        id: 'issue-press-mount',
-        title: 'Press mount is wobbly',
-        zoneId: 'zone-common',
-        artifactId: 'artifact-press',
-        severity: 'warning',
-        status: 'open',
-      }),
+      issue({ id: 'issue-press-mount', title: 'Press mount is wobbly', zoneId: 'zone-common', artifactId: 'artifact-press', severity: 'warning', status: 'open' }),
     ]);
     const checklist = buildZoneChecklist(state, 'zone-common')!;
     const press = checklist.entries.find((entry) => entry.artifactId === 'artifact-press')!;
     const quilt = checklist.entries.find((entry) => entry.artifactId === 'artifact-quilt')!;
-    expect(
-      press.unresolvedFindings.some(
-        (finding) => finding.title === 'Press mount is wobbly' && finding.scope === 'object',
-      ),
-    ).toBe(true);
+    expect(press.unresolvedFindings.some((finding) => finding.title === 'Press mount is wobbly' && finding.scope === 'object')).toBe(true);
     // quilt-light is resolved in seed and must not surface
-    expect(quilt.unresolvedFindings.some((finding) => finding.title.includes('quilt lux'))).toBe(
-      false,
-    );
+    expect(quilt.unresolvedFindings.some((finding) => finding.title.includes('quilt lux'))).toBe(false);
     expect(checklist.unresolvedCount).toBe(1);
   });
 
@@ -77,18 +55,12 @@ describe('buildZoneChecklist', () => {
     expect(checklist.zoneFindings[0].title).toBe('Reduce entry panel copy');
     expect(checklist.zoneFindings[0].scope).toBe('zone');
     const lantern = checklist.entries[0];
-    expect(
-      lantern.unresolvedFindings.some(
-        (finding) => finding.scope === 'zone' && finding.title === 'Reduce entry panel copy',
-      ),
-    ).toBe(true);
+    expect(lantern.unresolvedFindings.some((finding) => finding.scope === 'zone' && finding.title === 'Reduce entry panel copy')).toBe(true);
   });
 
   it('does not leak findings from other zones or their objects', () => {
     const checklist = buildZoneChecklist(createSeedWorkspace(), 'zone-arrival')!;
-    const titles = checklist.entries.flatMap((entry) =>
-      entry.unresolvedFindings.map((finding) => finding.title),
-    );
+    const titles = checklist.entries.flatMap((entry) => entry.unresolvedFindings.map((finding) => finding.title));
     expect(titles.some((title) => title.includes('transcript'))).toBe(false);
   });
 });
@@ -105,14 +77,7 @@ describe('serializeZoneChecklistCsv', () => {
 
   it('quotes fields containing commas', () => {
     const state = stateWithIssues([
-      issue({
-        id: 'issue-comma',
-        title: 'Mount, base loose',
-        zoneId: 'zone-patterns',
-        artifactId: 'artifact-sample-book',
-        severity: 'warning',
-        status: 'open',
-      }),
+      issue({ id: 'issue-comma', title: 'Mount, base loose', zoneId: 'zone-patterns', artifactId: 'artifact-sample-book', severity: 'warning', status: 'open' }),
     ]);
     const csv = serializeZoneChecklistCsv(buildZoneChecklist(state, 'zone-patterns')!);
     expect(csv).toContain('"[WARNING] Mount, base loose (Jo Renner, open)"');

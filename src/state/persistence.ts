@@ -16,14 +16,12 @@ const ISSUE_STATUSES: Array<IssueStatus | 'all'> = ['all', 'open', 'in-progress'
 function isWorkspaceState(value: unknown): value is WorkspaceState {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<WorkspaceState>;
-  return (
-    candidate.version === 1 &&
-    Boolean(candidate.project) &&
-    Array.isArray(candidate.artifacts) &&
-    Array.isArray(candidate.zones) &&
-    Array.isArray(candidate.issues) &&
-    Boolean(candidate.preferences)
-  );
+  return candidate.version === 1
+    && Boolean(candidate.project)
+    && Array.isArray(candidate.artifacts)
+    && Array.isArray(candidate.zones)
+    && Array.isArray(candidate.issues)
+    && Boolean(candidate.preferences);
 }
 
 export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage): WorkspaceState {
@@ -32,18 +30,13 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage):
     if (!raw) return createSeedWorkspace();
     const parsed: unknown = JSON.parse(raw);
     const migrated = migrateWorkspace(parsed);
-    return migrated && isWorkspaceState(migrated)
-      ? validateReferences(migrated)
-      : createSeedWorkspace();
+    return migrated && isWorkspaceState(migrated) ? validateReferences(migrated) : createSeedWorkspace();
   } catch {
     return createSeedWorkspace();
   }
 }
 
-export function saveWorkspace(
-  state: WorkspaceState,
-  storage: Pick<Storage, 'setItem'> = localStorage,
-): boolean {
+export function saveWorkspace(state: WorkspaceState, storage: Pick<Storage, 'setItem'> = localStorage): boolean {
   try {
     storage.setItem(STORAGE_KEY, JSON.stringify(state));
     return true;
@@ -63,9 +56,7 @@ export function loadReviewUi(storage: Pick<Storage, 'getItem'> = localStorage): 
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return DEFAULT_REVIEW_UI;
     const candidate = parsed as Partial<ReviewUiState>;
-    const status: IssueStatus | 'all' = ISSUE_STATUSES.includes(
-      candidate.status as IssueStatus | 'all',
-    )
+    const status: IssueStatus | 'all' = ISSUE_STATUSES.includes(candidate.status as IssueStatus | 'all')
       ? (candidate.status as IssueStatus | 'all')
       : 'all';
     return {
@@ -77,10 +68,7 @@ export function loadReviewUi(storage: Pick<Storage, 'getItem'> = localStorage): 
   }
 }
 
-export function saveReviewUi(
-  ui: ReviewUiState,
-  storage: Pick<Storage, 'setItem'> = localStorage,
-): void {
+export function saveReviewUi(ui: ReviewUiState, storage: Pick<Storage, 'setItem'> = localStorage): void {
   try {
     storage.setItem(REVIEW_UI_KEY, JSON.stringify(ui));
   } catch {

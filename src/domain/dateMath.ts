@@ -6,9 +6,7 @@ export function daysUntil(dateValue: string, from = new Date()): number {
   return Math.ceil((target.getTime() - start.getTime()) / 86_400_000);
 }
 
-export function isPast(dateValue: string, from = new Date()): boolean {
-  return daysUntil(dateValue, from) < 0;
-}
+export function isPast(dateValue: string, from = new Date()): boolean { return daysUntil(dateValue, from) < 0; }
 
 export function dateStatus(dateValue: string, from = new Date()): 'past' | 'soon' | 'planned' {
   const days = daysUntil(dateValue, from);
@@ -17,9 +15,7 @@ export function dateStatus(dateValue: string, from = new Date()): 'past' | 'soon
 
 export function monthLabel(dateValue: string): string {
   const date = new Date(`${dateValue}T00:00:00`);
-  return Number.isNaN(date.getTime())
-    ? 'Unscheduled'
-    : new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(date);
+  return Number.isNaN(date.getTime()) ? 'Unscheduled' : new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(date);
 }
 
 export function clampDate(value: string, minimum: string, maximum: string): string {
@@ -39,15 +35,9 @@ export function addDays(dateValue: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function isoToday(now = new Date()): string {
-  return now.toISOString().slice(0, 10);
-}
-export function sameDay(left: string, right: string): boolean {
-  return left.slice(0, 10) === right.slice(0, 10);
-}
-export function isValidDate(value: string): boolean {
-  return !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
-}
+export function isoToday(now = new Date()): string { return now.toISOString().slice(0, 10); }
+export function sameDay(left: string, right: string): boolean { return left.slice(0, 10) === right.slice(0, 10); }
+export function isValidDate(value: string): boolean { return !Number.isNaN(new Date(`${value}T00:00:00`).getTime()); }
 export const DAY_MS = 86_400_000;
 
 export function isWeekend(dateValue: string): boolean {

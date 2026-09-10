@@ -20,8 +20,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: 'c. 1908',
         medium: 'Brass, glass, cotton wick',
         origin: 'York, England',
-        summary:
-          'A hand-carried signal lantern whose worn handle records decades of night work along regional rail lines.',
+        summary: 'A hand-carried signal lantern whose worn handle records decades of night work along regional rail lines.',
         dimensions: { width: 19, height: 34, depth: 18, unit: 'cm' },
         dwellMinutes: 4,
         narrativeRole: 'threshold',
@@ -41,8 +40,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: '1926–1931',
         medium: 'Textile, ink, paper',
         origin: 'Barcelona, Spain',
-        summary:
-          'A compact archive of hand-dyed threads documenting subtle shifts in color recipes across five working seasons.',
+        summary: 'A compact archive of hand-dyed threads documenting subtle shifts in color recipes across five working seasons.',
         dimensions: { width: 28, height: 36, depth: 5, unit: 'cm' },
         dwellMinutes: 6,
         narrativeRole: 'context',
@@ -62,8 +60,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: '1952',
         medium: 'Cast iron, steel, rubber',
         origin: 'Osaka, Japan',
-        summary:
-          'A compact press used by neighborhood organizers to print event notices, mutual-aid cards, and public messages.',
+        summary: 'A compact press used by neighborhood organizers to print event notices, mutual-aid cards, and public messages.',
         dimensions: { width: 42, height: 51, depth: 38, unit: 'cm' },
         dwellMinutes: 7,
         narrativeRole: 'turning-point',
@@ -83,8 +80,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: '1968',
         medium: 'Bakelite, copper, fabric',
         origin: 'Detroit, United States',
-        summary:
-          'A domestic radio repaired repeatedly by one family, carrying music and news through three generations.',
+        summary: 'A domestic radio repaired repeatedly by one family, carrying music and news through three generations.',
         dimensions: { width: 33, height: 22, depth: 18, unit: 'cm' },
         dwellMinutes: 5,
         narrativeRole: 'context',
@@ -104,8 +100,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: '1979',
         medium: 'Cotton, wool, embroidery thread',
         origin: 'Kingston, Jamaica',
-        summary:
-          'A community quilt mapping remembered storms through stitched paths, dates, and fragments of household cloth.',
+        summary: 'A community quilt mapping remembered storms through stitched paths, dates, and fragments of household cloth.',
         dimensions: { width: 210, height: 176, depth: 2, unit: 'cm' },
         dwellMinutes: 8,
         narrativeRole: 'turning-point',
@@ -125,8 +120,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: 'c. 1987',
         medium: 'Stoneware, brass staples',
         origin: 'Seoul, South Korea',
-        summary:
-          'A household bowl held together by visible repairs, preserving evidence of care rather than hiding damage.',
+        summary: 'A household bowl held together by visible repairs, preserving evidence of care rather than hiding damage.',
         dimensions: { width: 31, height: 12, depth: 31, unit: 'cm' },
         dwellMinutes: 4,
         narrativeRole: 'reflection',
@@ -146,8 +140,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: '1994',
         medium: 'Magnetic tape, plastic, paper',
         origin: 'Glasgow, Scotland',
-        summary:
-          'One cassette from a neighborhood oral-history project, containing recollections of factories after closure.',
+        summary: 'One cassette from a neighborhood oral-history project, containing recollections of factories after closure.',
         dimensions: { width: 10, height: 6, depth: 1.2, unit: 'cm' },
         dwellMinutes: 6,
         narrativeRole: 'reflection',
@@ -167,8 +160,7 @@ export function createSeedWorkspace(): WorkspaceState {
         yearLabel: '2001–2018',
         medium: 'Cotton, graphite, pigment',
         origin: 'Zagreb, Croatia',
-        summary:
-          'A series of marked gloves retained by a conservator, each pair bearing traces from a completed treatment.',
+        summary: 'A series of marked gloves retained by a conservator, each pair bearing traces from a completed treatment.',
         dimensions: { width: 24, height: 31, depth: 3, unit: 'cm' },
         dwellMinutes: 3,
         narrativeRole: 'reflection',
@@ -239,8 +231,7 @@ export function createSeedWorkspace(): WorkspaceState {
       {
         id: 'issue-audio-transcript',
         title: 'Add transcript beside oral history station',
-        description:
-          'The current audio treatment needs a synchronized transcript and a printed fallback.',
+        description: 'The current audio treatment needs a synchronized transcript and a printed fallback.',
         severity: 'critical',
         status: 'in-progress',
         zoneId: 'zone-after',
@@ -252,8 +243,7 @@ export function createSeedWorkspace(): WorkspaceState {
       {
         id: 'issue-entry-copy',
         title: 'Reduce entry panel copy',
-        description:
-          'The opening panel currently competes with the lantern sightline and should be shortened.',
+        description: 'The opening panel currently competes with the lantern sightline and should be shortened.',
         severity: 'warning',
         status: 'open',
         zoneId: 'zone-arrival',
@@ -264,8 +254,7 @@ export function createSeedWorkspace(): WorkspaceState {
       {
         id: 'issue-quilt-light',
         title: 'Confirm quilt lux rotation',
-        description:
-          'Conservation confirmed the zone level; document the planned three-month rotation.',
+        description: 'Conservation confirmed the zone level; document the planned three-month rotation.',
         severity: 'note',
         status: 'resolved',
         zoneId: 'zone-common',

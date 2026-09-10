@@ -7,9 +7,7 @@ test('curate object set through collection route', async ({ page }) => {
   await page.getByLabel('Title').fill('A New Material Memory');
   await page.getByLabel('Maker / source').fill('Studio North');
   await page.getByLabel('Medium').fill('Paper and graphite');
-  await page
-    .getByLabel('Summary')
-    .fill('A new object with enough context to join the exhibition narrative.');
+  await page.getByLabel('Summary').fill('A new object with enough context to join the exhibition narrative.');
   await page.getByLabel('Width (cm)').fill('10');
   await page.getByLabel('Height (cm)').fill('12');
   await page.getByLabel('Depth (cm)').fill('2');

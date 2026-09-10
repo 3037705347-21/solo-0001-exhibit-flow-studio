@@ -1,19 +1,10 @@
-import type {
-  Artifact,
-  ConstraintFinding,
-  JourneyAnalysis,
-  NarrativeRole,
-  Zone,
-  ZoneAnalysis,
-} from './models';
+import type { Artifact, ConstraintFinding, JourneyAnalysis, NarrativeRole, Zone, ZoneAnalysis } from './models';
 
 const ALL_ROLES: NarrativeRole[] = ['threshold', 'context', 'turning-point', 'reflection'];
 
 function zoneArtifacts(zone: Zone, artifacts: Artifact[]): Artifact[] {
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
-  return zone.artifactIds
-    .map((id) => byId.get(id))
-    .filter((artifact): artifact is Artifact => Boolean(artifact));
+  return zone.artifactIds.map((id) => byId.get(id)).filter((artifact): artifact is Artifact => Boolean(artifact));
 }
 
 function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
@@ -111,9 +102,7 @@ export function analyzeJourney(artifacts: Artifact[], zones: Zone[]): JourneyAna
   const keyObjects = artifacts.filter((artifact) => artifact.isKeyObject);
   const placedKeyObjects = keyObjects.filter((artifact) => placedIds.has(artifact.id));
   const placedRoles = new Set(
-    artifacts
-      .filter((artifact) => placedIds.has(artifact.id))
-      .map((artifact) => artifact.narrativeRole),
+    artifacts.filter((artifact) => placedIds.has(artifact.id)).map((artifact) => artifact.narrativeRole),
   );
   const findings = zoneAnalyses.flatMap((zone) => zone.findings);
 

@@ -13,28 +13,16 @@ const PROJECT_TRANSITIONS: Record<ProjectStage, ProjectStage[]> = {
 };
 
 export class TransitionError extends Error {
-  constructor(
-    message: string,
-    public readonly from: string,
-    public readonly to: string,
-  ) {
+  constructor(message: string, public readonly from: string, public readonly to: string) {
     super(message);
     this.name = 'TransitionError';
   }
 }
 
-export function transitionIssue(
-  issue: ReviewIssue,
-  target: IssueStatus,
-  at = new Date(),
-): ReviewIssue {
+export function transitionIssue(issue: ReviewIssue, target: IssueStatus, at = new Date()): ReviewIssue {
   if (issue.status === target) return issue;
   if (!ISSUE_TRANSITIONS[issue.status].includes(target)) {
-    throw new TransitionError(
-      `Cannot move a review finding from ${issue.status} to ${target}.`,
-      issue.status,
-      target,
-    );
+    throw new TransitionError(`Cannot move a review finding from ${issue.status} to ${target}.`, issue.status, target);
   }
   const timestamp = at.toISOString();
   return {
@@ -49,11 +37,7 @@ export function transitionProject(state: WorkspaceState, target: ProjectStage): 
   const source = state.project.stage;
   if (source === target) return state;
   if (!PROJECT_TRANSITIONS[source].includes(target)) {
-    throw new TransitionError(
-      `Cannot move the project from ${source} to ${target}.`,
-      source,
-      target,
-    );
+    throw new TransitionError(`Cannot move the project from ${source} to ${target}.`, source, target);
   }
   return { ...state, project: { ...state.project, stage: target } };
 }
