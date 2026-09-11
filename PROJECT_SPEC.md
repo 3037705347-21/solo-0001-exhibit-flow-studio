@@ -20,6 +20,7 @@ The application is a pure frontend project. It does not require accounts, a serv
 - `Placement`: the assignment of an artifact to a zone and a position in that zone.
 - `ReviewIssue`: a severity-ranked finding linked to a zone or artifact, with open, in-progress, or resolved state.
 - `Snapshot`: a frozen readiness summary used for local export and comparison.
+- `ReleasePackage`: an immutable, numbered publication of the current plan containing objects in zone order, object metadata, findings, per-zone floor checklists, and a readiness summary.
 
 ## Workflows
 
@@ -35,6 +36,8 @@ The user opens the journey view, assigns unplaced objects to zones, changes plac
 
 The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
 
+When the plan is ready the responsible reviewer can publish a review release package (`REL-0001`, `REL-0002`, …). Publishing runs the same readiness gate, freezes a deep copy of objects in zone order, full object metadata, every finding, per-zone floor checklists, and the readiness summary into a package stored with the workspace. Packages are immutable and only ever appended; editing artifacts, zones, or findings afterwards keeps changing the live plan while the package stays byte-stable. The review desk compares each package against the current workspace fingerprints and reports drift with the specific objects, zones, and findings that invalidated it, and every published package remains available as history. Legacy JSON snapshots exported before this feature can still be opened read-only, with drift assessed against the records they contain. Packages never bypass readiness: publishing on a blocked plan is refused and no file export can replace a stored package.
+
 ### 4. Compare planning scenarios
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
@@ -49,6 +52,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
+- Release packages can only be published through the readiness gate; published packages are immutable, append-only, and never mutated by later edits or reset comparisons.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
 
 ## Modules and dependency direction
@@ -67,6 +71,7 @@ Feature pages call state commands. State commands validate through the domain mo
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
 - Local persistence key: `exhibit-flow.workspace.v1`.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.
+- JSON release package download: `exhibit-flow-release-<REL-number>-<date>.json`; the canonical package record is the immutable entry stored in the workspace, not the downloaded file.
 
 ## Validation plan
 

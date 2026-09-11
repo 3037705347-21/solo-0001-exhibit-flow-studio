@@ -1,5 +1,5 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileArchive, FileWarning, History, ListChecks, MapPin, PackageCheck, Plus, RotateCcw, Send, ShieldAlert, Sparkles, Upload, UserRound, XCircle } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -7,31 +7,40 @@ import { Modal } from '../../components/Modal';
 import { SectionHeader } from '../../components/SectionHeader';
 import { SelectField } from '../../components/SelectField';
 import { TextField } from '../../components/TextField';
-import { downloadTextFile } from '../../domain/export';
+import { downloadTextFile, parseSnapshot } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
 import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
 import { analyzeJourney } from '../../domain/journeyAnalysis';
 import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
 import { evaluateReadiness } from '../../domain/reviewRules';
+import { assessReleaseDrift, formatReleaseNumber } from '../../domain/release';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
 import { loadReviewUi, saveReviewUi, type ReviewUiState } from '../../state/persistence';
 import { useWorkspace } from '../../state/WorkspaceContext';
+import { ReleasePackageViewer, type PackageViewerTarget } from './ReleasePackageViewer';
 
 type StatusFilter = IssueStatus | 'all';
 const STATUS_FILTERS: StatusFilter[] = ['all', 'open', 'in-progress', 'resolved'];
 
 export function ReviewPage() {
-  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
+  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot, publishRelease } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
   const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
   const [toast, setToast] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<'positive' | 'warning'>('positive');
+  const [viewer, setViewer] = useState<PackageViewerTarget | null>(null);
+  const snapshotFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { saveReviewUi(reviewUi); }, [reviewUi]);
   const setZoneId = (zoneId: string) => setReviewUi((ui) => ({ ...ui, zoneId }));
   const setStatus = (status: StatusFilter) => setReviewUi((ui) => ({ ...ui, status }));
 
-  const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 2600); };
+  const notify = (message: string, tone: 'positive' | 'warning' = 'positive') => {
+    setToast(message);
+    setToastTone(tone);
+    window.setTimeout(() => setToast(null), 3200);
+  };
 
   const zones = useMemo(() => sortZones(state.zones), [state.zones]);
   const selectedZone = zones.find((zone) => zone.id === reviewUi.zoneId);
@@ -55,9 +64,26 @@ export function ReviewPage() {
   const runCheck = () => setReadiness(checkReadiness());
   const exportSnapshot = () => {
     const result = createSnapshot();
-    if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.'); return; }
+    if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.', 'warning'); return; }
     downloadTextFile(JSON.stringify(result.value, null, 2), `exhibit-flow-snapshot-${new Date().toISOString().slice(0, 10)}.json`);
     notify('Snapshot downloaded.');
+  };
+  const publishPackage = () => {
+    const result = publishRelease();
+    if (!result.ok || !result.value) {
+      notify(result.message ?? 'Resolve blockers before publishing.', 'warning');
+      setReadiness(checkReadiness());
+      return;
+    }
+    setReadiness(checkReadiness());
+    setViewer({ kind: 'release', release: result.value });
+    notify(`${formatReleaseNumber(result.value.number)} frozen and stored with this exhibition.`);
+  };
+  const openLegacySnapshot = async (file: File) => {
+    const raw = await file.text();
+    const snapshot = parseSnapshot(raw);
+    if (!snapshot) { notify('That file is not a readable ExhibitFlow snapshot.', 'warning'); return; }
+    setViewer({ kind: 'snapshot', snapshot, fileName: file.name });
   };
   const exportChecklist = () => {
     if (!selectedZone || !checklist) return;
@@ -65,9 +91,10 @@ export function ReviewPage() {
     notify('Zone checklist downloaded.');
   };
 
-  return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
-    <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
+  return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then freeze a package for the installation team." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
+    <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <><Button variant="primary" icon={<PackageCheck size={16} />} onClick={publishPackage}>Publish release package</Button><Button variant="secondary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button></> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
     {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
+    <ReleaseRegistry onOpen={setViewer} onImportClick={() => snapshotFileRef.current?.click()} importRef={snapshotFileRef} onImportFile={openLegacySnapshot} />
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
     <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
@@ -75,8 +102,43 @@ export function ReviewPage() {
     <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
-    {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
+    {viewer && <ReleasePackageViewer target={viewer} onClose={() => setViewer(null)} />}
+    {toast && <div className={`toast ${toastTone === 'positive' ? 'toast-positive' : 'toast-warning'}`}>{toastTone === 'positive' ? <PackageCheck size={16} /> : <ShieldAlert size={16} />}{toast}</div>}
   </div>;
+}
+
+function ReleaseRegistry({ onOpen, onImportClick, importRef, onImportFile }: {
+  onOpen: (target: PackageViewerTarget) => void;
+  onImportClick: () => void;
+  importRef: RefObject<HTMLInputElement | null>;
+  onImportFile: (file: File) => void;
+}) {
+  const { state } = useWorkspace();
+  const releases = [...state.releases].sort((left, right) => right.number - left.number);
+  const driftByRelease = useMemo(() => new Map(releases.map((release) => [release.id, assessReleaseDrift(release, state)])), [releases, state]);
+  const driftCount = releases.filter((release) => driftByRelease.get(release.id)?.drifted).length;
+  return <section className="release-registry" aria-label="Published release packages">
+    <div className="panel-heading">
+      <div><div className="eyebrow">REVIEW RELEASE PACKAGES</div><h2>Install-team freeze history</h2></div>
+      <div className="release-registry-actions">
+        <Badge tone={driftCount ? 'warning' : releases.length ? 'positive' : 'neutral'}>{driftCount ? `${driftCount} drifted` : releases.length ? 'All current' : 'None published'}</Badge>
+        <Button variant="secondary" icon={<Upload size={15} />} onClick={onImportClick}>Open legacy snapshot</Button>
+      </div>
+    </div>
+    <input ref={importRef} type="file" accept="application/json,.json" className="release-file-input" onChange={(event) => { const file = event.target.files?.[0]; if (file) void onImportFile(file); event.target.value = ''; }} />
+    <p className="release-registry-note">A published package is frozen under a stable number with ordered objects, metadata, findings, floor checklists, and a readiness summary. Editing the plan afterwards never changes the package; the drift badge shows whether the live workspace still matches it.</p>
+    {releases.length === 0
+      ? <div className="release-empty"><FileArchive size={20} /><span>No release package has been published yet. Run the readiness check, then publish once the gate is clear.</span></div>
+      : <div className="release-list">{releases.map((release) => {
+        const drift = driftByRelease.get(release.id);
+        const drifted = Boolean(drift?.drifted);
+        return <button className="release-row" key={release.id} onClick={() => onOpen({ kind: 'release', release })}>
+          <span className={`release-row-icon ${drifted ? 'drifted' : 'current'}`}>{drifted ? <AlertCircle size={17} /> : <History size={17} />}</span>
+          <span className="release-row-main"><strong>{release.label}</strong><small>{formatDate(release.publishedAt)} · {release.zones.reduce((total, item) => total + item.checklist.objectCount, 0)} objects · {release.issues.length} findings · readiness {release.readiness.score}</small></span>
+          <Badge tone={drifted ? 'warning' : 'positive'}>{drifted ? `${drift?.entries.length ?? 0} record${(drift?.entries.length ?? 0) === 1 ? '' : 's'} drifted` : 'Matches workspace'}</Badge>
+        </button>;
+      })}</div>}
+  </section>;
 }
 
 function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<ReturnType<typeof buildZoneChecklist>>; onDownload: () => void }) {

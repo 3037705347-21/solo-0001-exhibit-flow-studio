@@ -26,7 +26,7 @@ npm run check       # all checks in sequence
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
 - `src/features/collection`: searchable object library and validated editor.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
-- `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
+- `src/features/review`: finding lifecycle, readiness gate, immutable release packages with drift tracking, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
 - `src/components`: shared shell, navigation, forms, badges, metrics, dialogs, and visual primitives.
 
@@ -35,6 +35,8 @@ npm run check       # all checks in sequence
 - Object records accept accession ID, title, maker, period, medium, origin, dimensions, dwell time, narrative role, sensitivity, access need, tags, and key-object status.
 - Review findings accept severity, owner, optional zone/object links, and decision context.
 - A successful readiness check enables a JSON file named `exhibit-flow-snapshot-YYYY-MM-DD.json` containing the project, sequenced zones, objects, summary metrics, and unresolved non-blocking issues.
+- A ready plan can also be published as a **review release package**: an immutable record with a stable number (`REL-0001`, …) containing objects in zone order, full object metadata, every finding, per-zone floor checklists, and the readiness summary. Packages are stored with the exhibition, survive later edits and reloads, and show a drift indicator naming the objects, zones, and findings that changed after the freeze. The package JSON can additionally be downloaded as `exhibit-flow-release-REL-####-YYYY-MM-DD.json`, but the stored package is the canonical record and publishing never bypasses readiness.
+- Older `exhibit-flow-snapshot-*.json` exports remain readable through **Open legacy snapshot** on the review desk; they open read-only and report drift limited to the records they contain.
 
 ## Design notes
 

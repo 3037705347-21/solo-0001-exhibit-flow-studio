@@ -8,7 +8,7 @@
     {"id": "state", "path": "src/state", "responsibility": "commands, reducer, selectors, sample state, and browser persistence"},
     {"id": "collection", "path": "src/features/collection", "responsibility": "artifact discovery, filtering, creation, and editing workflow"},
     {"id": "journey", "path": "src/features/journey", "responsibility": "zone planning, placement transitions, and constraint feedback"},
-    {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, and snapshot export"},
+    {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, immutable release packages with drift tracking, and snapshot export"},
     {"id": "insights", "path": "src/features/insights", "responsibility": "scenario projection and plan-level analysis"},
     {"id": "components", "path": "src/components", "responsibility": "shared navigation, dialogs, feedback, charts, and UI primitives"}
   ],
@@ -40,10 +40,10 @@
       "id": "review-to-readiness",
       "name": "Run a review to readiness",
       "entry": "browser route /review",
-      "steps": ["create a linked review finding", "advance the finding through allowed states", "run readiness rules and export a snapshot when eligible"],
-      "success": "resolved findings are recorded and readiness shows a stable outcome",
-      "failure": "illegal transitions and unresolved blockers prevent ready state and snapshot export",
-      "verification": "Playwright creates, advances, and resolves a finding, then runs the readiness check",
+      "steps": ["create a linked review finding", "advance the finding through allowed states", "run readiness rules and export a snapshot when eligible", "publish an immutable numbered release package and reopen it after later edits to see which records drifted"],
+      "success": "resolved findings are recorded, readiness shows a stable outcome, and a published package stays frozen while its drift indicator tracks workspace changes",
+      "failure": "illegal transitions and unresolved blockers prevent ready state, snapshot export, and release publication",
+      "verification": "Playwright creates, advances, and resolves a finding, runs the readiness check, publishes a package, edits an object and a finding, then verifies frozen content, drift, history retention, and legacy snapshot compatibility",
       "module_ids": ["app", "review", "state", "domain", "components"]
     },
     {

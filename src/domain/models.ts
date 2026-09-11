@@ -84,6 +84,8 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  releases: ReleasePackage[];
+  releaseSequence: number;
   lastSavedAt?: string;
 }
 
@@ -187,4 +189,76 @@ export interface Snapshot {
   };
   zones: Array<Zone & { artifacts: Artifact[] }>;
   unresolvedIssues: ReviewIssue[];
+}
+
+export interface ReleaseChecklistFinding {
+  severity: IssueSeverity;
+  status: IssueStatus;
+  title: string;
+  owner: string;
+  scope: 'object' | 'zone';
+}
+
+export interface ReleaseChecklistEntry {
+  sequence: number;
+  artifactId: string;
+  accessionId: string;
+  title: string;
+  dwellMinutes: number;
+  unresolvedFindings: ReleaseChecklistFinding[];
+}
+
+export interface ReleaseChecklist {
+  zoneId: string;
+  zoneName: string;
+  zoneShortLabel: string;
+  thesis: string;
+  generatedAt: string;
+  totalDwellMinutes: number;
+  objectCount: number;
+  unresolvedCount: number;
+  zoneFindings: ReleaseChecklistFinding[];
+  entries: ReleaseChecklistEntry[];
+}
+
+export interface ReleaseZone {
+  zone: Zone;
+  artifacts: Artifact[];
+  checklist: ReleaseChecklist;
+}
+
+export interface ReleaseReadinessSummary {
+  ready: boolean;
+  score: number;
+  blockers: string[];
+  cautions: string[];
+  checkedAt: string;
+  visitMinutes: number;
+  placedCount: number;
+  unplacedCount: number;
+  artifactCount: number;
+  zoneCount: number;
+  unresolvedCriticalCount: number;
+}
+
+export interface ReleaseFingerprints {
+  artifacts: Record<string, string>;
+  zones: Record<string, string>;
+  issues: Record<string, string>;
+}
+
+export interface ReleasePackage {
+  kind: 'review-release';
+  schemaVersion: 1;
+  id: string;
+  number: number;
+  label: string;
+  publishedAt: string;
+  project: ExhibitProject;
+  preferences: PlanningPreferences;
+  zones: ReleaseZone[];
+  unplacedArtifacts: Artifact[];
+  issues: ReviewIssue[];
+  readiness: ReleaseReadinessSummary;
+  fingerprints: ReleaseFingerprints;
 }

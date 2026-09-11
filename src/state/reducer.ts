@@ -36,6 +36,14 @@ function assignArtifact(state: WorkspaceState, artifactId: string, zoneId: strin
   };
 }
 
+function normalizeIssue(issue: WorkspaceState['issues'][number]): WorkspaceState['issues'][number] {
+  const normalized: WorkspaceState['issues'][number] = { ...issue };
+  if (!normalized.zoneId) delete normalized.zoneId;
+  if (!normalized.artifactId) delete normalized.artifactId;
+  if (!normalized.resolvedAt) delete normalized.resolvedAt;
+  return normalized;
+}
+
 function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: string, direction: -1 | 1): WorkspaceState {
   return {
     ...state,
@@ -81,7 +89,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject({
         ...state,
         issues: state.issues.map((issue) =>
-          issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
+          issue.id === action.issueId ? normalizeIssue(transitionIssue(issue, action.status, action.at)) : issue,
         ),
       }));
     case 'preferences/update':
@@ -94,6 +102,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           stage: action.ready ? 'ready' : 'review',
           lastReadinessCheck: action.checkedAt,
         },
+      });
+    case 'release/publish':
+      // Publishing an already-verified release also marks the readiness check at
+      // the same instant; a single action keeps the freeze and project stage atomic.
+      return stamp({
+        ...state,
+        project: {
+          ...state.project,
+          stage: 'ready',
+          lastReadinessCheck: action.release.publishedAt,
+        },
+        releases: [...state.releases, action.release],
+        releaseSequence: Math.max(state.releaseSequence, action.release.number),
       });
     case 'workspace/reset':
       return action.state;

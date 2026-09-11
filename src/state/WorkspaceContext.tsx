@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { buildReleasePackage, nextReleaseNumber } from '../domain/release';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ReleasePackage, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -28,6 +29,7 @@ interface WorkspaceContextValue {
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
+  publishRelease: () => CommandResult<ReleasePackage>;
   resetWorkspace: () => void;
 }
 
@@ -136,6 +138,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
+  const publishRelease = useCallback((): CommandResult<ReleasePackage> => {
+    const analysis = analyzeJourney(state.artifacts, state.zones);
+    const readiness = evaluateReadiness(state, analysis);
+    if (!readiness.ready) {
+      return { ok: false, message: readiness.blockers[0] ?? 'Resolve blockers before publishing.' };
+    }
+    const release = buildReleasePackage(state, readiness, new Date(), nextReleaseNumber(state));
+    dispatch({ type: 'release/publish', release });
+    return { ok: true, value: release };
+  }, [state]);
+
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
@@ -151,8 +164,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    publishRelease,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, publishRelease, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
