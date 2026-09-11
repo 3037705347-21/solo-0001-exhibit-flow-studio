@@ -3,6 +3,7 @@ import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, Workspace
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
   | { type: 'artifact/remove'; artifactId: string }
+  | { type: 'artifacts/import'; artifacts: Artifact[] }
   | { type: 'placement/assign'; artifactId: string; zoneId: string; index?: number }
   | { type: 'placement/remove'; artifactId: string }
   | { type: 'placement/reorder'; zoneId: string; artifactId: string; direction: -1 | 1 }

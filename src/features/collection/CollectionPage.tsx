@@ -1,4 +1,4 @@
-import { Filter, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Filter, Plus, Search, SlidersHorizontal, Upload, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { ArtifactGlyph } from '../../components/ArtifactGlyph';
 import { Badge } from '../../components/Badge';
@@ -12,6 +12,7 @@ import { artifactToDraft, emptyArtifactDraft } from '../../domain/artifactValida
 import { titleCase } from '../../domain/formatters';
 import type { Artifact, ArtifactDraft, NarrativeRole, Sensitivity } from '../../domain/models';
 import { useWorkspace } from '../../state/WorkspaceContext';
+import { CsvImportWizard } from './CsvImportWizard';
 
 const roleOptions: NarrativeRole[] = ['threshold', 'context', 'turning-point', 'reflection'];
 const sensitivityOptions: Sensitivity[] = ['standard', 'low-light', 'fragile'];
@@ -23,6 +24,7 @@ export function CollectionPage() {
   const [sensitivityFilter, setSensitivityFilter] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [editor, setEditor] = useState<{ draft: ArtifactDraft; existing?: Artifact } | null>(null);
+  const [showImport, setShowImport] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const filtered = useMemo(() => state.artifacts.filter((artifact) => {
@@ -39,13 +41,14 @@ export function CollectionPage() {
     return result;
   };
 
-  return <div className="page-stack"><SectionHeader eyebrow="OBJECT LIBRARY" title="Collection" description="Shape the cast of objects before you ask them to carry a story." actions={<Button variant="primary" icon={<Plus size={17} />} onClick={() => setEditor({ draft: emptyArtifactDraft })}>Add object</Button>} />
+  return <div className="page-stack"><SectionHeader eyebrow="OBJECT LIBRARY" title="Collection" description="Shape the cast of objects before you ask them to carry a story." actions={<div className="header-button-row"><Button variant="secondary" icon={<Upload size={16} />} onClick={() => setShowImport(true)}>Import CSV</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setEditor({ draft: emptyArtifactDraft })}>Add object</Button></div>} />
     <div className="summary-strip"><div><span className="eyebrow">COLLECTION SIZE</span><strong>{state.artifacts.length}<small> objects</small></strong></div><div><span className="eyebrow">KEY OBJECTS</span><strong>{state.artifacts.filter((artifact) => artifact.isKeyObject).length}<small> flagged</small></strong></div><div><span className="eyebrow">ROLES COVERED</span><strong>{new Set(state.artifacts.map((artifact) => artifact.narrativeRole)).size}<small> of 4</small></strong></div><div><span className="eyebrow">FILTERED VIEW</span><strong>{filtered.length}<small> showing</small></strong></div></div>
     <section className="toolbar"><div className="search-box"><Search size={17} /><input aria-label="Search collection" placeholder="Search title, maker, ID, or tag" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <Button variant="ghost" icon={<X size={15} />} aria-label="Clear search" onClick={() => setQuery('')} />}</div><Button variant={showFilters ? 'primary' : 'secondary'} icon={<SlidersHorizontal size={16} />} onClick={() => setShowFilters((value) => !value)}>Filters</Button><div className="toolbar-count"><Filter size={14} /> {filtered.length} results</div></section>
     {showFilters && <section className="filter-drawer"><SelectField label="Narrative role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="all">All roles</option>{roleOptions.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</SelectField><SelectField label="Sensitivity" value={sensitivityFilter} onChange={(event) => setSensitivityFilter(event.target.value)}><option value="all">All sensitivities</option>{sensitivityOptions.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</SelectField><Button variant="ghost" onClick={() => { setRoleFilter('all'); setSensitivityFilter('all'); }}>Clear filters</Button></section>}
     {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} onEdit={() => setEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => { if (window.confirm(`Remove ${artifact.title} from the collection?`)) removeArtifact(artifact.id); }} />)}</div>}
     {feedback && <div className="toast toast-positive">{feedback}</div>}
     {editor && <ArtifactEditor initial={editor.draft} existing={editor.existing} onClose={() => setEditor(null)} onSave={handleSave} />}
+    {showImport && <CsvImportWizard onClose={() => setShowImport(false)} onCompleted={(summary) => { setShowImport(false); setFeedback(summary); window.setTimeout(() => setFeedback(null), 4200); }} />}
   </div>;
 }
 

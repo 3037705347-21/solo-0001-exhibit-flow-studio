@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { buildImportPlan, type CsvImportAnalysis } from '../domain/csvImport';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
@@ -20,6 +21,7 @@ interface WorkspaceContextValue {
   storageHealthy: boolean;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
+  importArtifacts: (analysis: CsvImportAnalysis, options?: { skipConflicts?: boolean }) => CommandResult<{ added: number; updated: number; skipped: number }>;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
@@ -60,6 +62,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!artifact) return { ok: false, message: 'The selected object no longer exists.' };
     dispatch({ type: 'artifact/remove', artifactId });
     return { ok: true };
+  }, [state.artifacts]);
+
+  const importArtifacts = useCallback((analysis: CsvImportAnalysis, options: { skipConflicts?: boolean } = {}): CommandResult<{ added: number; updated: number; skipped: number }> => {
+    // Replan against the current collection: the preview may predate other edits.
+    const plan = buildImportPlan(analysis, state.artifacts, options);
+    if (!plan || plan.length === 0) {
+      return { ok: false, message: 'Resolve field errors and conflicts before importing.' };
+    }
+    const updated = plan.filter((artifact) => state.artifacts.some((existing) => existing.id === artifact.id)).length;
+    const skipped = options.skipConflicts ? analysis.rows.filter((row) => row.status === 'conflict').length : 0;
+    try {
+      // One dispatch, one reducer commit, one persistence write — atomic batch.
+      dispatch({ type: 'artifacts/import', artifacts: plan });
+      return { ok: true, value: { added: plan.length - updated, updated, skipped } };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The import could not be written.' };
+    }
   }, [state.artifacts]);
 
   const assignArtifact = useCallback((artifactId: string, zoneId: string): CommandResult => {
@@ -143,6 +162,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     storageHealthy,
     upsertArtifact,
     removeArtifact,
+    importArtifacts,
     assignArtifact,
     removePlacement,
     reorderArtifact,
@@ -152,7 +172,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, importArtifacts, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

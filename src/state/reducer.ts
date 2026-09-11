@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { normalizeAccessionId } from '../domain/ids';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -68,6 +69,31 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
         issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
       }));
+    }
+    case 'artifacts/import': {
+      if (action.artifacts.length === 0) throw new Error('Nothing to import.');
+      // Defensive re-check: an invalid batch must leave the workspace untouched.
+      const incomingIds = new Set<string>();
+      const incomingAccessionIds = new Set<string>();
+      for (const artifact of action.artifacts) {
+        if (incomingIds.has(artifact.id)) throw new Error('The import batch contains duplicate artifact ids.');
+        const normalized = normalizeAccessionId(artifact.accessionId);
+        if (incomingAccessionIds.has(normalized)) throw new Error('The import batch contains duplicate accession IDs.');
+        incomingIds.add(artifact.id);
+        incomingAccessionIds.add(normalized);
+        const clashesWithOther = state.artifacts.some((existing) =>
+          existing.id !== artifact.id && normalizeAccessionId(existing.accessionId) === normalized,
+        );
+        if (clashesWithOther) throw new Error(`The import batch clashes with existing record ${artifact.accessionId}.`);
+      }
+      // New records append in file order; allowed updates replace in place. One commit, one persistence write.
+      const artifacts = [...state.artifacts];
+      for (const artifact of action.artifacts) {
+        const index = artifacts.findIndex((candidate) => candidate.id === artifact.id);
+        if (index === -1) artifacts.push(artifact);
+        else artifacts[index] = artifact;
+      }
+      return stamp(regressReadyProject({ ...state, artifacts }));
     }
     case 'placement/assign':
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));

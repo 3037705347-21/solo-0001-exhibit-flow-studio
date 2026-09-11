@@ -24,7 +24,7 @@ npm run check       # all checks in sequence
 
 - `src/domain`: entities, validation boundaries, journey analysis, state transitions, readiness, and scenario projection.
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
-- `src/features/collection`: searchable object library and validated editor.
+- `src/features/collection`: searchable object library, validated editor, and CSV import wizard.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
 - `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
@@ -33,6 +33,7 @@ npm run check       # all checks in sequence
 ## Inputs and outputs
 
 - Object records accept accession ID, title, maker, period, medium, origin, dimensions, dwell time, narrative role, sensitivity, access need, tags, and key-object status.
+- **Collection CSV import** (`Import CSV` on the collection page) parses headers before touching the workspace and shows a row-by-row preview classified as *new*, *safe update*, *conflict with an existing accession ID*, or *field error*. Commas, double quotes (including escaped `""`), embedded newlines, blank lines, ragged rows, repeated accession IDs, and illegal numbers/enums are handled by an RFC-4180 parser. Existing objects are never overwritten unless the reviewer explicitly allows updates; conflicts can alternatively be skipped. Confirmation writes the whole batch in a single reducer commit and persistence write — any error or cancellation leaves the workspace, journey unplaced queue, and stored state exactly as they were.
 - Review findings accept severity, owner, optional zone/object links, and decision context.
 - A successful readiness check enables a JSON file named `exhibit-flow-snapshot-YYYY-MM-DD.json` containing the project, sequenced zones, objects, summary metrics, and unresolved non-blocking issues.
 
