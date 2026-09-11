@@ -10,6 +10,7 @@
     {"id": "journey", "path": "src/features/journey", "responsibility": "zone planning, placement transitions, and constraint feedback"},
     {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, and snapshot export"},
     {"id": "insights", "path": "src/features/insights", "responsibility": "scenario projection and plan-level analysis"},
+    {"id": "command", "path": "src/features/command", "responsibility": "project command center aggregating the shared domain engines into one readiness entry point"},
     {"id": "components", "path": "src/components", "responsibility": "shared navigation, dialogs, feedback, charts, and UI primitives"}
   ],
   "complexity": {

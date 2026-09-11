@@ -1,4 +1,5 @@
 import { analyzeJourney, getUnplacedArtifacts } from '../domain/journeyAnalysis';
+import { buildCommandCenter, type CommandCenter } from '../domain/commandCenter';
 import { issueProgress } from '../domain/reviewRules';
 import type { Artifact, ReviewIssue, WorkspaceState, Zone } from '../domain/models';
 
@@ -36,4 +37,8 @@ export function selectWorkspaceSummary(state: WorkspaceState) {
     openIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
     criticalIssues: state.issues.filter((issue) => issue.severity === 'critical' && issue.status !== 'resolved'),
   };
+}
+
+export function selectCommandCenter(state: WorkspaceState): CommandCenter {
+  return buildCommandCenter(state);
 }

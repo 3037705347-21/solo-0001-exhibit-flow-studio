@@ -23,6 +23,10 @@ The application is a pure frontend project. It does not require accounts, a serv
 
 ## Workflows
 
+### 0. Open the project command center
+
+The team opens one project-level view before the individual workspaces. The command center shows the project name, venue, opening countdown, a live readiness score, object placement ratio, key object and narrative role coverage, unresolved findings, zone capacity risk, and the last formal readiness check. The view is a pure projection over the same domain analysis used by the feature pages; it never duplicates calculations or edits objects, zones, findings, preferences, or project stage. Each risk block links to the originating page (`/collection`, `/journey`, `/review`, or `/insights`) with a locator query so the affected zone, object, or finding is highlighted. Empty workspaces, `draft`/`review`/`ready` stages, missing formal checks, and fully completed plans each render an explicit, non-misleading status.
+
 ### 1. Curate the object set
 
 The user opens the collection view, searches and filters existing objects, adds an object through a validated editor, and sees it enter the collection. Duplicate accession identifiers, missing titles, invalid dimensions, and invalid dwell times are rejected with field-level messages. The created object is persisted in local storage and becomes immediately available to the journey planner.
@@ -56,14 +60,14 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - `app`: application composition, routing, shell, providers, and page entry points.
 - `domain`: entity types, validation, state transitions, journey analysis, readiness rules, and scenario projections.
 - `state`: reducer, commands, persistence adapter, seed data, and selectors.
-- `features`: collection, journey, review, and insights vertical slices using public state commands.
+- `features`: command center plus collection, journey, review, and insights vertical slices using public state commands.
 - `components`: reusable interface primitives, charts, navigation, feedback, and modal infrastructure.
 
 Feature pages call state commands. State commands validate through the domain module before updating and persisting state. Derived selectors call pure domain analysis functions. Components do not mutate domain state directly.
 
 ## Public interfaces
 
-- Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
+- Browser routes: `/command` (project command center, default landing route), `/collection`, `/journey`, `/review`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
 - Local persistence key: `exhibit-flow.workspace.v1`.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.
