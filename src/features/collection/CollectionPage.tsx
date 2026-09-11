@@ -1,5 +1,5 @@
 import { Filter, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArtifactGlyph } from '../../components/ArtifactGlyph';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
@@ -17,7 +17,7 @@ const roleOptions: NarrativeRole[] = ['threshold', 'context', 'turning-point', '
 const sensitivityOptions: Sensitivity[] = ['standard', 'low-light', 'fragile'];
 
 export function CollectionPage() {
-  const { state, upsertArtifact, removeArtifact } = useWorkspace();
+  const { state, upsertArtifact, removeArtifact, beginInteraction, endInteraction, conflict } = useWorkspace();
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [sensitivityFilter, setSensitivityFilter] = useState('all');
@@ -30,22 +30,33 @@ export function CollectionPage() {
     return haystack.includes(query.toLowerCase()) && (roleFilter === 'all' || artifact.narrativeRole === roleFilter) && (sensitivityFilter === 'all' || artifact.sensitivity === sensitivityFilter);
   }), [state.artifacts, query, roleFilter, sensitivityFilter]);
 
+  // Pin the base revision for the lifetime of the editor so a save that races another tab is detected.
+  const openEditor = (next: { draft: ArtifactDraft; existing?: Artifact }) => {
+    beginInteraction();
+    setEditor(next);
+  };
+  const closeEditor = () => {
+    setEditor(null);
+    endInteraction();
+  };
+  // The version-conflict dialog takes over; drop the editor behind it without releasing the pinned base.
+  useEffect(() => { if (conflict) setEditor(null); }, [conflict]);
   const handleSave = (draft: ArtifactDraft, existing?: Artifact) => {
     const result = upsertArtifact(draft, existing);
     if (!result.ok) return result;
-    setEditor(null);
+    closeEditor();
     setFeedback(existing ? 'Object details updated.' : 'Object added to the collection.');
     window.setTimeout(() => setFeedback(null), 2400);
     return result;
   };
 
-  return <div className="page-stack"><SectionHeader eyebrow="OBJECT LIBRARY" title="Collection" description="Shape the cast of objects before you ask them to carry a story." actions={<Button variant="primary" icon={<Plus size={17} />} onClick={() => setEditor({ draft: emptyArtifactDraft })}>Add object</Button>} />
+  return <div className="page-stack"><SectionHeader eyebrow="OBJECT LIBRARY" title="Collection" description="Shape the cast of objects before you ask them to carry a story." actions={<Button variant="primary" icon={<Plus size={17} />} onClick={() => openEditor({ draft: emptyArtifactDraft })}>Add object</Button>} />
     <div className="summary-strip"><div><span className="eyebrow">COLLECTION SIZE</span><strong>{state.artifacts.length}<small> objects</small></strong></div><div><span className="eyebrow">KEY OBJECTS</span><strong>{state.artifacts.filter((artifact) => artifact.isKeyObject).length}<small> flagged</small></strong></div><div><span className="eyebrow">ROLES COVERED</span><strong>{new Set(state.artifacts.map((artifact) => artifact.narrativeRole)).size}<small> of 4</small></strong></div><div><span className="eyebrow">FILTERED VIEW</span><strong>{filtered.length}<small> showing</small></strong></div></div>
     <section className="toolbar"><div className="search-box"><Search size={17} /><input aria-label="Search collection" placeholder="Search title, maker, ID, or tag" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <Button variant="ghost" icon={<X size={15} />} aria-label="Clear search" onClick={() => setQuery('')} />}</div><Button variant={showFilters ? 'primary' : 'secondary'} icon={<SlidersHorizontal size={16} />} onClick={() => setShowFilters((value) => !value)}>Filters</Button><div className="toolbar-count"><Filter size={14} /> {filtered.length} results</div></section>
     {showFilters && <section className="filter-drawer"><SelectField label="Narrative role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="all">All roles</option>{roleOptions.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</SelectField><SelectField label="Sensitivity" value={sensitivityFilter} onChange={(event) => setSensitivityFilter(event.target.value)}><option value="all">All sensitivities</option>{sensitivityOptions.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</SelectField><Button variant="ghost" onClick={() => { setRoleFilter('all'); setSensitivityFilter('all'); }}>Clear filters</Button></section>}
-    {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} onEdit={() => setEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => { if (window.confirm(`Remove ${artifact.title} from the collection?`)) removeArtifact(artifact.id); }} />)}</div>}
+    {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} onEdit={() => openEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => { if (window.confirm(`Remove ${artifact.title} from the collection?`)) removeArtifact(artifact.id); }} />)}</div>}
     {feedback && <div className="toast toast-positive">{feedback}</div>}
-    {editor && <ArtifactEditor initial={editor.draft} existing={editor.existing} onClose={() => setEditor(null)} onSave={handleSave} />}
+    {editor && <ArtifactEditor initial={editor.draft} existing={editor.existing} onClose={closeEditor} onSave={handleSave} />}
   </div>;
 }
 

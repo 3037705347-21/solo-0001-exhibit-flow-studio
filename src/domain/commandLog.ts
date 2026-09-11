@@ -20,6 +20,7 @@ export function describeAction(action: WorkspaceAction): string {
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
     case 'workspace/reset': return 'Reset workspace to sample plan';
+    case 'workspace/replace': return 'Adopted a newer workspace version';
   }
 }
 

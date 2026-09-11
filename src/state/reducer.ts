@@ -97,6 +97,9 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       });
     case 'workspace/reset':
       return action.state;
+    case 'workspace/replace':
+      // Adoption of a newer remote document or a replayed merge; already stamped by the other tab.
+      return action.state;
     default:
       return state;
   }

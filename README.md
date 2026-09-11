@@ -11,6 +11,16 @@ npm run dev
 
 Open `http://127.0.0.1:4173`. The app uses the browser's local storage key `exhibit-flow.workspace.v1`; no network services or environment variables are required. Use **Reset sample plan** in the sidebar to restore the built-in exhibition.
 
+### Working in several tabs
+
+The workspace is versioned. Every autosave carries a monotonically increasing **revision**, and a tab can only commit a write when storage still holds the revision that write was based on (compare-and-swap). If another tab has already moved the workspace forward, the stale tab does **not** overwrite it: a dialog shows both sides of the change — your unsaved change and the change already saved in the other tab — grouped by object, placement, finding, or planning preferences.
+
+- **Reload newer version** adopts the saved revision and discards the local attempt.
+- **Redo my change** replays your intents on top of the newest revision. Placements keep the position they had in your tab; findings, object edits, and preferences are merged where they touch different records. When the two sides edit the same record, redo is gated behind an explicit “I have compared the changes” confirmation; illegal replays (missing records, duplicate accession IDs, dangling links) are reported instead of written.
+- **Close** hides the dialog but keeps a persistent banner so the unresolved conflict is never silently forgotten.
+
+Tabs with no in-flight edit transparently adopt newer revisions, so ordinary single-tab editing stays fully automatic. If a write cannot reach browser storage (quota, private mode, temporary failure), the change stays in the tab, the sidebar indicator switches to *Local save unavailable*, and the commit retries on focus/online/timer without ever replacing the last good document. A document that cannot be parsed is moved aside to `exhibit-flow.workspace-recovered.v1` instead of being deleted, and the sample plan opens for the session.
+
 ## Validation commands
 
 ```bash
@@ -38,4 +48,4 @@ npm run check       # all checks in sequence
 
 ## Design notes
 
-State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.
+State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace through a revision compare-and-swap in the local persistence adapter. Each stored document is an envelope (`format`, `formatVersion`, `revision`, `writtenAt`, `workspace`); a pre-envelope bare v1 document is wrapped transparently on first load. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.

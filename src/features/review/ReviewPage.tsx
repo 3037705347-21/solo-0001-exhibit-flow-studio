@@ -21,11 +21,16 @@ type StatusFilter = IssueStatus | 'all';
 const STATUS_FILTERS: StatusFilter[] = ['all', 'open', 'in-progress', 'resolved'];
 
 export function ReviewPage() {
-  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
+  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot, beginInteraction, endInteraction, conflict } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
   const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
   const [toast, setToast] = useState<string | null>(null);
+
+  const openModal = () => { beginInteraction(); setShowModal(true); };
+  const closeModal = () => { setShowModal(false); endInteraction(); };
+  // The version-conflict dialog takes over; drop the editor behind it without releasing the pinned base.
+  useEffect(() => { if (conflict) setShowModal(false); }, [conflict]);
 
   useEffect(() => { saveReviewUi(reviewUi); }, [reviewUi]);
   const setZoneId = (zoneId: string) => setReviewUi((ui) => ({ ...ui, zoneId }));
@@ -52,7 +57,11 @@ export function ReviewPage() {
   const filtered = scopedIssues.filter((issue) => filter === 'all' || issue.status === filter);
   const checklist = selectedZone ? buildZoneChecklist(state, selectedZone.id) : null;
 
-  const runCheck = () => setReadiness(checkReadiness());
+  const runCheck = () => {
+    const command = checkReadiness();
+    if (!command.ok) notify(command.message ?? 'Readiness could not be saved; review the version conflict.');
+    if (command.value) setReadiness(command.value);
+  };
   const exportSnapshot = () => {
     const result = createSnapshot();
     if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.'); return; }
@@ -65,7 +74,7 @@ export function ReviewPage() {
     notify('Zone checklist downloaded.');
   };
 
-  return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
+  return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={openModal}>New finding</Button></div>} />
     <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
     {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
@@ -74,7 +83,7 @@ export function ReviewPage() {
     {checklist && <ZoneChecklistCard checklist={checklist} onDownload={exportChecklist} />}
     <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
-    {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
+    {showModal && <IssueEditor state={state} onClose={closeModal} onSave={(draft) => { const result = addIssue(draft); if (result.ok) closeModal(); return result; }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
   </div>;
 }
