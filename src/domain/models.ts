@@ -84,6 +84,11 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  /** Append-only ledger of exported packages; never rewritten by deletes. */
+  publishedPackages: PublishedPackage[];
+  /** Recoverable deletion audit trail (records prune after the audit horizon). */
+  deletionRecords: DeletionRecord[];
+  restoreReports: RestoreReport[];
   lastSavedAt?: string;
 }
 
@@ -187,4 +192,75 @@ export interface Snapshot {
   };
   zones: Array<Zone & { artifacts: Artifact[] }>;
   unresolvedIssues: ReviewIssue[];
+}
+
+/**
+ * A published export package recorded in an append-only ledger. The ledger is
+ * never rewritten by later deletes, so the historical package keeps describing
+ * the plan exactly as it was when it left the studio.
+ */
+export interface PublishedPackage {
+  id: string;
+  kind: 'snapshot' | 'zone-checklist';
+  fileName: string;
+  publishedAt: string;
+  projectTitle: string;
+  zoneId?: string;
+  /** Areas fully contained in a plan-wide snapshot. */
+  zoneIds?: string[];
+  artifactIds: string[];
+  issueIds: string[];
+}
+
+export type DeletionTargetKind = 'artifact' | 'zone' | 'issue';
+
+/**
+ * An auditable, recoverable record of a delete. The full pre-delete state of
+ * every reference touched by the delete is captured here so the impact review
+ * can preview the change and a later restore can re-create the exact graph
+ * without mutating historical published packages.
+ */
+export interface DeletionRecord {
+  id: string;
+  kind: DeletionTargetKind;
+  deletedAt: string;
+  expiresAt: string;
+  targetId: string;
+  targetLabel: string;
+  /** Primary record removed by the user (artifact or zone); absent for findings. */
+  artifact?: Artifact;
+  zone?: Zone;
+  issue?: ReviewIssue;
+  /** Placements removed or detached, in their original zone/position order. */
+  placements: Array<{ zoneId: string; zoneName: string; index: number; artifactId: string; artifactTitle: string; action: 'removed' | 'detached' }>;
+  /** Findings cascade-removed (artifact delete) or detached (zone delete). */
+  cascadeIssues: ReviewIssue[];
+  detachments: Array<{ issueId: string; issueTitle: string; field: 'zoneId' | 'artifactId' }>;
+  /** Published packages that referenced the deleted graph at delete time. */
+  publishedPackageIds: string[];
+  restoredAt?: string;
+  purgedAt?: string;
+}
+
+export type RestoreDecision = 'restore' | 'overwrite' | 'skip' | 'detach';
+
+export interface RestoreConflict {
+  id: string;
+  severity: 'blocking' | 'warning';
+  subject: 'record' | 'placement' | 'issue' | 'zone';
+  subjectLabel: string;
+  message: string;
+  options: RestoreDecision[];
+  decision: RestoreDecision;
+}
+
+export interface RestoreSummaryLine {
+  label: string;
+  outcome: 'restored' | 'overwritten' | 'skipped' | 'detached';
+}
+
+export interface RestoreReport {
+  recordId: string;
+  restoredAt: string;
+  lines: RestoreSummaryLine[];
 }

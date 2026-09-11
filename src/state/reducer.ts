@@ -1,3 +1,4 @@
+import { applyDeletion, commitRestore, pruneDeletionHistory } from '../domain/deletion';
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
@@ -61,13 +62,13 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         : [...state.artifacts, action.artifact];
       return stamp(regressReadyProject({ ...state, artifacts }));
     }
-    case 'artifact/remove': {
-      const withoutPlacement = removeArtifactFromZones(state, action.artifactId);
-      return stamp(regressReadyProject({
-        ...withoutPlacement,
-        artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
-        issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
-      }));
+    case 'artifact/delete':
+    case 'zone/delete':
+    case 'issue/delete':
+      return stamp(regressReadyProject(applyDeletion(state, action.record)));
+    case 'deletion/restore': {
+      const { state: restored } = commitRestore(state, action.recordId, action.decisions, new Date(action.at));
+      return stamp(regressReadyProject(restored));
     }
     case 'placement/assign':
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
@@ -86,6 +87,10 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       }));
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
+    case 'package/publish': {
+      if (state.publishedPackages.some((pkg) => pkg.id === action.pkg.id)) return state;
+      return stamp({ ...state, publishedPackages: [...state.publishedPackages, action.pkg] });
+    }
     case 'project/readiness':
       return stamp({
         ...state,
@@ -100,4 +105,9 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     default:
       return state;
   }
+}
+
+/** Prunes deletion audit entries past the retention horizon. */
+export function pruneWorkspace(state: WorkspaceState, now = Date.now()): WorkspaceState {
+  return pruneDeletionHistory(state, now);
 }

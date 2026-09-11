@@ -11,13 +11,17 @@ export interface CommandLogEntry {
 export function describeAction(action: WorkspaceAction): string {
   switch (action.type) {
     case 'artifact/upsert': return `Saved object ${action.artifact.accessionId}`;
-    case 'artifact/remove': return `Removed object ${action.artifactId}`;
+    case 'artifact/delete': return `Deleted object ${action.record.targetLabel} (recoverable)`;
+    case 'zone/delete': return `Deleted exhibition area ${action.record.targetLabel} (recoverable)`;
+    case 'issue/delete': return `Deleted finding ${action.record.targetLabel} (recoverable)`;
+    case 'deletion/restore': return `Restored content from deletion ${action.recordId}`;
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
+    case 'package/publish': return `Published package ${action.pkg.fileName}`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }

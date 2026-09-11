@@ -1,17 +1,18 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, Trash2, UserRound, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
+import { DeletedToast, DeleteFlowDialog } from '../../components/DeleteFlow';
 import { EmptyState } from '../../components/EmptyState';
 import { Modal } from '../../components/Modal';
 import { SectionHeader } from '../../components/SectionHeader';
 import { SelectField } from '../../components/SelectField';
 import { TextField } from '../../components/TextField';
-import { downloadTextFile } from '../../domain/export';
+import { downloadTextFile, snapshotFileName } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
 import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
 import { analyzeJourney } from '../../domain/journeyAnalysis';
-import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
+import type { DeletionRecord, IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
 import { evaluateReadiness } from '../../domain/reviewRules';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
 import { loadReviewUi, saveReviewUi, type ReviewUiState } from '../../state/persistence';
@@ -21,9 +22,11 @@ type StatusFilter = IssueStatus | 'all';
 const STATUS_FILTERS: StatusFilter[] = ['all', 'open', 'in-progress', 'resolved'];
 
 export function ReviewPage() {
-  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
+  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot, recordPublishedPackage, openRecovery } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
+  const [deleteIssue, setDeleteIssue] = useState<ReviewIssue | null>(null);
+  const [lastDeleted, setLastDeleted] = useState<DeletionRecord | null>(null);
   const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
   const [toast, setToast] = useState<string | null>(null);
 
@@ -56,13 +59,17 @@ export function ReviewPage() {
   const exportSnapshot = () => {
     const result = createSnapshot();
     if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.'); return; }
-    downloadTextFile(JSON.stringify(result.value, null, 2), `exhibit-flow-snapshot-${new Date().toISOString().slice(0, 10)}.json`);
-    notify('Snapshot downloaded.');
+    const fileName = snapshotFileName(new Date(result.value.generatedAt));
+    downloadTextFile(JSON.stringify(result.value, null, 2), fileName);
+    recordPublishedPackage({ kind: 'snapshot', snapshot: result.value, fileName });
+    notify('Snapshot downloaded and recorded in the export ledger. Deletes afterward will not rewrite it.');
   };
   const exportChecklist = () => {
     if (!selectedZone || !checklist) return;
-    downloadTextFile(serializeZoneChecklistCsv(checklist), zoneChecklistFileName(selectedZone), 'text/csv;charset=utf-8');
-    notify('Zone checklist downloaded.');
+    const fileName = zoneChecklistFileName(selectedZone);
+    downloadTextFile(serializeZoneChecklistCsv(checklist), fileName, 'text/csv;charset=utf-8');
+    recordPublishedPackage({ kind: 'zone-checklist', fileName, zoneId: selectedZone.id });
+    notify('Zone checklist downloaded and recorded in the export ledger.');
   };
 
   return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
@@ -72,10 +79,12 @@ export function ReviewPage() {
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
     <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
     {checklist && <ZoneChecklistCard checklist={checklist} onDownload={exportChecklist} />}
-    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
+    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} onDelete={() => setDeleteIssue(issue)} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
+    {deleteIssue && <DeleteFlowDialog kind="issue" targetId={deleteIssue.id} targetLabel={deleteIssue.title} onClose={() => setDeleteIssue(null)} onDeleted={(record) => setLastDeleted(record)} />}
+    {lastDeleted && <DeletedToast record={lastDeleted} onOpenRecovery={() => { setLastDeleted(null); openRecovery(); }} onDismiss={() => setLastDeleted(null)} />}
   </div>;
 }
 
@@ -93,12 +102,12 @@ function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<R
   </section>;
 }
 
-function IssueRow({ issue, onTransition }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
+function IssueRow({ issue, onTransition, onDelete }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string }; onDelete: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const next = issue.status === 'open' ? 'in-progress' : issue.status === 'in-progress' ? 'resolved' : 'in-progress';
   const resultLabel = issue.status === 'open' ? 'Start work' : issue.status === 'in-progress' ? 'Resolve' : 'Reopen';
   const result = () => { const response = onTransition(next); if (!response.ok) { setError(response.message ?? 'Transition failed.'); window.setTimeout(() => setError(null), 2500); } };
-  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
+  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><div className="issue-actions"><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button><Button variant="ghost" icon={<Trash2 size={15} />} aria-label={`Delete finding ${issue.title}`} onClick={onDelete}>Delete</Button></div></article>;
 }
 
 function IssueEditor({ state, onClose, onSave }: { state: ReturnType<typeof useWorkspace>['state']; onClose: () => void; onSave: (draft: IssueDraft) => { ok: boolean; errors?: Record<string, string> } }) {

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { ArtifactGlyph } from '../../components/ArtifactGlyph';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
+import { DeletedToast, DeleteFlowDialog } from '../../components/DeleteFlow';
 import { EmptyState } from '../../components/EmptyState';
 import { Modal } from '../../components/Modal';
 import { SectionHeader } from '../../components/SectionHeader';
@@ -10,19 +11,21 @@ import { SelectField } from '../../components/SelectField';
 import { TextField } from '../../components/TextField';
 import { artifactToDraft, emptyArtifactDraft } from '../../domain/artifactValidation';
 import { titleCase } from '../../domain/formatters';
-import type { Artifact, ArtifactDraft, NarrativeRole, Sensitivity } from '../../domain/models';
+import type { Artifact, ArtifactDraft, DeletionRecord, NarrativeRole, Sensitivity } from '../../domain/models';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
 const roleOptions: NarrativeRole[] = ['threshold', 'context', 'turning-point', 'reflection'];
 const sensitivityOptions: Sensitivity[] = ['standard', 'low-light', 'fragile'];
 
 export function CollectionPage() {
-  const { state, upsertArtifact, removeArtifact } = useWorkspace();
+  const { state, upsertArtifact, openRecovery } = useWorkspace();
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [sensitivityFilter, setSensitivityFilter] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [editor, setEditor] = useState<{ draft: ArtifactDraft; existing?: Artifact } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Artifact | null>(null);
+  const [lastDeleted, setLastDeleted] = useState<DeletionRecord | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const filtered = useMemo(() => state.artifacts.filter((artifact) => {
@@ -43,14 +46,16 @@ export function CollectionPage() {
     <div className="summary-strip"><div><span className="eyebrow">COLLECTION SIZE</span><strong>{state.artifacts.length}<small> objects</small></strong></div><div><span className="eyebrow">KEY OBJECTS</span><strong>{state.artifacts.filter((artifact) => artifact.isKeyObject).length}<small> flagged</small></strong></div><div><span className="eyebrow">ROLES COVERED</span><strong>{new Set(state.artifacts.map((artifact) => artifact.narrativeRole)).size}<small> of 4</small></strong></div><div><span className="eyebrow">FILTERED VIEW</span><strong>{filtered.length}<small> showing</small></strong></div></div>
     <section className="toolbar"><div className="search-box"><Search size={17} /><input aria-label="Search collection" placeholder="Search title, maker, ID, or tag" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <Button variant="ghost" icon={<X size={15} />} aria-label="Clear search" onClick={() => setQuery('')} />}</div><Button variant={showFilters ? 'primary' : 'secondary'} icon={<SlidersHorizontal size={16} />} onClick={() => setShowFilters((value) => !value)}>Filters</Button><div className="toolbar-count"><Filter size={14} /> {filtered.length} results</div></section>
     {showFilters && <section className="filter-drawer"><SelectField label="Narrative role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="all">All roles</option>{roleOptions.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</SelectField><SelectField label="Sensitivity" value={sensitivityFilter} onChange={(event) => setSensitivityFilter(event.target.value)}><option value="all">All sensitivities</option>{sensitivityOptions.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</SelectField><Button variant="ghost" onClick={() => { setRoleFilter('all'); setSensitivityFilter('all'); }}>Clear filters</Button></section>}
-    {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} onEdit={() => setEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => { if (window.confirm(`Remove ${artifact.title} from the collection?`)) removeArtifact(artifact.id); }} />)}</div>}
+    {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} onEdit={() => setEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => setDeleteTarget(artifact)} />)}</div>}
     {feedback && <div className="toast toast-positive">{feedback}</div>}
     {editor && <ArtifactEditor initial={editor.draft} existing={editor.existing} onClose={() => setEditor(null)} onSave={handleSave} />}
+    {deleteTarget && <DeleteFlowDialog kind="artifact" targetId={deleteTarget.id} targetLabel={deleteTarget.title} onClose={() => setDeleteTarget(null)} onDeleted={(record) => setLastDeleted(record)} />}
+    {lastDeleted && <DeletedToast record={lastDeleted} onOpenRecovery={() => { setLastDeleted(null); openRecovery(); }} onDismiss={() => setLastDeleted(null)} />}
   </div>;
 }
 
 function ArtifactCard({ artifact, onEdit, onRemove }: { artifact: Artifact; onEdit: () => void; onRemove: () => void }) {
-  return <article className="artifact-card"><div className="artifact-card-top"><ArtifactGlyph color={artifact.color} size="large" /><div className="artifact-actions"><Button variant="ghost" onClick={onEdit}>Edit</Button><Button variant="ghost" onClick={onRemove}>Remove</Button></div></div><div className="artifact-id">{artifact.accessionId}</div><h3>{artifact.title}</h3><p className="artifact-maker">{artifact.maker} · {artifact.yearLabel}</p><p className="artifact-summary">{artifact.summary}</p><div className="tag-row"><Badge tone="info">{titleCase(artifact.narrativeRole)}</Badge><Badge tone={artifact.sensitivity === 'low-light' ? 'warning' : 'neutral'}>{titleCase(artifact.sensitivity)}</Badge>{artifact.isKeyObject && <Badge tone="danger">Key object</Badge>}</div><div className="artifact-card-bottom"><span>{artifact.medium}</span><strong>{artifact.dwellMinutes} min dwell</strong></div></article>;
+  return <article className="artifact-card"><div className="artifact-card-top"><ArtifactGlyph color={artifact.color} size="large" /><div className="artifact-actions"><Button variant="ghost" onClick={onEdit}>Edit</Button><Button variant="ghost" aria-label={`Delete object ${artifact.title}`} onClick={onRemove}>Remove</Button></div></div><div className="artifact-id">{artifact.accessionId}</div><h3>{artifact.title}</h3><p className="artifact-maker">{artifact.maker} · {artifact.yearLabel}</p><p className="artifact-summary">{artifact.summary}</p><div className="tag-row"><Badge tone="info">{titleCase(artifact.narrativeRole)}</Badge><Badge tone={artifact.sensitivity === 'low-light' ? 'warning' : 'neutral'}>{titleCase(artifact.sensitivity)}</Badge>{artifact.isKeyObject && <Badge tone="danger">Key object</Badge>}</div><div className="artifact-card-bottom"><span>{artifact.medium}</span><strong>{artifact.dwellMinutes} min dwell</strong></div></article>;
 }
 
 function ArtifactEditor({ initial, existing, onClose, onSave }: { initial: ArtifactDraft; existing?: Artifact; onClose: () => void; onSave: (draft: ArtifactDraft, existing?: Artifact) => { ok: boolean; errors?: Record<string, string> } }) {
