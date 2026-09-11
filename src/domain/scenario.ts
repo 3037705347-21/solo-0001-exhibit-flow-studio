@@ -7,10 +7,14 @@ const PACE_MULTIPLIER: Record<ScenarioInput['pace'], number> = {
 };
 
 export function clampScenario(input: ScenarioInput): ScenarioInput {
+  const target = input.targetVisitMinutes === null
+    ? null
+    : Math.max(5, Math.min(240, Math.round(input.targetVisitMinutes)));
   return {
     pace: input.pace,
     accessibilityPriority: Math.max(0, Math.min(100, Math.round(input.accessibilityPriority))),
     groupSize: Math.max(1, Math.min(30, Math.round(input.groupSize))),
+    targetVisitMinutes: target,
   };
 }
 
@@ -45,8 +49,20 @@ export function projectScenario(
   if (pressureZoneIds.length) recommendations.push('Redistribute objects from pressure zones before increasing group size.');
   if (accessibilityScore < 75) recommendations.push('Add seating or alternative interpretation to improve access coverage.');
   if (narrativeScore < 100) recommendations.push('Place missing key objects and narrative roles to complete the story arc.');
+  if (input.targetVisitMinutes !== null && durationMinutes > input.targetVisitMinutes) {
+    recommendations.push(`Projected visit runs ${durationMinutes - input.targetVisitMinutes} minutes over the ${input.targetVisitMinutes}-minute target.`);
+  }
   if (durationMinutes > 55) recommendations.push('Offer a short-route cue for visitors with limited time.');
   if (recommendations.length === 0) recommendations.push('This scenario is balanced across duration, access, and narrative coverage.');
 
-  return { durationMinutes, comfortScore, accessibilityScore, narrativeScore, pressureZoneIds, recommendations };
+  return {
+    durationMinutes,
+    targetVisitMinutes: input.targetVisitMinutes,
+    targetDeltaMinutes: input.targetVisitMinutes === null ? null : durationMinutes - input.targetVisitMinutes,
+    comfortScore,
+    accessibilityScore,
+    narrativeScore,
+    pressureZoneIds,
+    recommendations,
+  };
 }

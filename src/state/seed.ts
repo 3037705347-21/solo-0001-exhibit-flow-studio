@@ -2,7 +2,7 @@ import type { WorkspaceState } from '../domain/models';
 
 export function createSeedWorkspace(): WorkspaceState {
   return {
-    version: 1,
+    version: 2,
     project: {
       id: 'project-afterlight',
       title: 'Afterlight: Material Memory',
@@ -10,6 +10,7 @@ export function createSeedWorkspace(): WorkspaceState {
       audience: 'General visitors, age 12+',
       openingDate: '2027-03-18',
       stage: 'review',
+      planCode: 'AFT-2027-0318',
     },
     artifacts: [
       {
@@ -269,6 +270,7 @@ export function createSeedWorkspace(): WorkspaceState {
       pace: 'balanced',
       accessibilityPriority: 70,
       groupSize: 6,
+      targetVisitMinutes: 45,
     },
     lastSavedAt: '2026-09-01T14:30:00.000Z',
   };

@@ -66,6 +66,8 @@ Feature pages call state commands. State commands validate through the domain mo
 - Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
 - Local persistence key: `exhibit-flow.workspace.v1`.
+- Workspace backup file (current schema version 2): `exhibit-flow-workspace-<date>.json`, a `exhibit-flow.workspace-file` envelope that re-enters the versioned migration/recovery flow.
+- Recovery flow: version detection → ordered migration steps → reviewable records (added, kept, invalidated, needs confirmation) → one validated, rollback-capable write. The sample plan and recovery share the same structural validation path.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.
 
 ## Validation plan

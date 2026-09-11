@@ -3,9 +3,18 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, RestoreProvenance, Snapshot, WorkspaceState } from '../domain/models';
+import { serializeWorkspaceFile } from '../domain/workspaceFile';
+import {
+  applyReviewDecisions,
+  buildMigrationPlan,
+  findWorkspaceShapeErrors,
+  type AppliedMigration,
+  type MigrationPlan,
+  type ReviewDecisions,
+} from './migrations';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import { loadWorkspace, readPersistedWorkspace, replaceWorkspace, rollbackWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -15,9 +24,22 @@ interface CommandResult<T = undefined> {
   message?: string;
 }
 
+export type ImportPreviewResult =
+  | { ok: true; plan: MigrationPlan }
+  | { ok: false; reason: string };
+
+interface RecoverySnapshot {
+  /** In-memory state that recovery replaced, used for undo. */
+  state: WorkspaceState;
+  /** Storage bytes captured before the write, used for storage rollback. */
+  previousBytes: string | null;
+  provenance: RestoreProvenance;
+}
+
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
+  lastRecovery: RecoverySnapshot | null;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
@@ -29,13 +51,23 @@ interface WorkspaceContextValue {
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
+  previewWorkspaceImport: (raw: string | File) => Promise<ImportPreviewResult>;
+  commitRecovery: (plan: MigrationPlan, decisions: ReviewDecisions, sourceFileName?: string) => CommandResult<AppliedMigration>;
+  undoLastRecovery: () => CommandResult;
+  exportWorkspaceFile: () => CommandResult<string>;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+async function readImportInput(raw: string | File): Promise<unknown> {
+  if (typeof raw === 'string') return raw;
+  return raw.text();
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
+  const [lastRecovery, setLastRecovery] = useState<RecoverySnapshot | null>(null);
 
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
@@ -136,11 +168,99 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
-  const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
+  const resetWorkspace = useCallback(() => {
+    // A deliberate sample reset is a new baseline; an undo would otherwise
+    // appear available but resurrect a recovery the user moved past.
+    setLastRecovery(null);
+    dispatch({ type: 'workspace/reset', state: createSeedWorkspace() });
+  }, []);
+
+  const previewWorkspaceImport = useCallback(async (raw: string | File): Promise<ImportPreviewResult> => {
+    let textContent: unknown;
+    try {
+      textContent = await readImportInput(raw);
+    } catch {
+      return { ok: false, reason: 'The selected file could not be read.' };
+    }
+    const result = buildMigrationPlan(textContent);
+    if (!result.ok) return { ok: false, reason: result.reason };
+    // The preview itself never mutates the current workspace or storage.
+    const shapeErrors = findWorkspaceShapeErrors(
+      applyReviewDecisions(result.plan).state,
+    );
+    if (shapeErrors.length > 0) {
+      return { ok: false, reason: `Migration produced an unusable workspace: ${shapeErrors[0]}` };
+    }
+    return { ok: true, plan: result.plan };
+  }, []);
+
+  const commitRecovery = useCallback((plan: MigrationPlan, decisions: ReviewDecisions, sourceFileName?: string): CommandResult<AppliedMigration> => {
+    const applied = applyReviewDecisions(plan, decisions);
+    const shapeErrors = findWorkspaceShapeErrors(applied.state);
+    if (shapeErrors.length > 0) {
+      return { ok: false, message: shapeErrors[0] };
+    }
+
+    const previousBytes = readPersistedWorkspace();
+    const snapshot: RecoverySnapshot = {
+      state,
+      previousBytes,
+      provenance: {
+        restoredAt: new Date().toISOString(),
+        sourceVersion: plan.report.sourceVersion,
+        ...(sourceFileName ? { sourceFileName } : {}),
+        retainedCount: applied.counters.kept,
+        addedCount: applied.counters.added,
+        invalidatedCount: applied.counters.invalid,
+        confirmedCount: applied.confirmedCount,
+      },
+    };
+
+    const recoveredState: WorkspaceState = {
+      ...applied.state,
+      restoredFrom: snapshot.provenance,
+    };
+    const write = replaceWorkspace(recoveredState);
+    if (!write.ok) {
+      // Storage was never touched (validation failure) or was rolled back to
+      // the previous bytes; the current in-memory workspace is untouched.
+      return {
+        ok: false,
+        message: write.errors[0] ?? 'Recovery could not be written; the current workspace is unchanged.',
+      };
+    }
+
+    setLastRecovery({ ...snapshot, previousBytes: write.previous });
+    dispatch({ type: 'workspace/replace', state: recoveredState });
+    return { ok: true, value: applied };
+  }, [state]);
+
+  const undoLastRecovery = useCallback((): CommandResult => {
+    const snapshot = lastRecovery;
+    if (!snapshot) return { ok: false, message: 'There is no recovery to undo.' };
+    const restored = rollbackWorkspace(snapshot.previousBytes);
+    if (!restored) return { ok: false, message: 'The browser refused to restore the previous workspace.' };
+    setLastRecovery(null);
+    dispatch({ type: 'workspace/replace', state: snapshot.state });
+    return { ok: true };
+  }, [lastRecovery]);
+
+  const exportWorkspaceFile = useCallback((): CommandResult<string> => {
+    const shapeErrors = findWorkspaceShapeErrors(state);
+    if (shapeErrors.length > 0) {
+      return { ok: false, message: `The current workspace cannot be exported: ${shapeErrors[0]}` };
+    }
+    try {
+      return { ok: true, value: serializeWorkspaceFile(state) };
+    } catch {
+      return { ok: false, message: 'The workspace could not be serialized.' };
+    }
+  }, [state]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
+    lastRecovery,
     upsertArtifact,
     removeArtifact,
     assignArtifact,
@@ -152,7 +272,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+    previewWorkspaceImport,
+    commitRecovery,
+    undoLastRecovery,
+    exportWorkspaceFile,
+  }), [state, storageHealthy, lastRecovery, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace, previewWorkspaceImport, commitRecovery, undoLastRecovery, exportWorkspaceFile]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

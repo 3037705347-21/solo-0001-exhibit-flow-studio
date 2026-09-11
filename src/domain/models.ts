@@ -61,10 +61,25 @@ export interface ReviewIssue {
   resolvedAt?: string;
 }
 
+export const CURRENT_WORKSPACE_VERSION = 2 as const;
+export type WorkspaceVersion = 0 | 1 | 2;
+
 export interface PlanningPreferences {
   pace: 'focused' | 'balanced' | 'leisurely';
   accessibilityPriority: number;
   groupSize: number;
+  targetVisitMinutes: number | null;
+}
+
+/** Provenance of the last reviewed workspace recovery, stamped on the v2 state. */
+export interface RestoreProvenance {
+  restoredAt: string;
+  sourceVersion: WorkspaceVersion;
+  sourceFileName?: string;
+  retainedCount: number;
+  addedCount: number;
+  invalidatedCount: number;
+  confirmedCount: number;
 }
 
 export interface ExhibitProject {
@@ -74,16 +89,18 @@ export interface ExhibitProject {
   audience: string;
   openingDate: string;
   stage: ProjectStage;
+  planCode?: string;
   lastReadinessCheck?: string;
 }
 
 export interface WorkspaceState {
-  version: 1;
+  version: 2;
   project: ExhibitProject;
   artifacts: Artifact[];
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  restoredFrom?: RestoreProvenance;
   lastSavedAt?: string;
 }
 
@@ -164,10 +181,13 @@ export interface ScenarioInput {
   pace: PlanningPreferences['pace'];
   accessibilityPriority: number;
   groupSize: number;
+  targetVisitMinutes: number | null;
 }
 
 export interface ScenarioProjection {
   durationMinutes: number;
+  targetVisitMinutes: number | null;
+  targetDeltaMinutes: number | null;
   comfortScore: number;
   accessibilityScore: number;
   narrativeScore: number;

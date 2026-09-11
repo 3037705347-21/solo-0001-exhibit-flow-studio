@@ -97,6 +97,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       });
     case 'workspace/reset':
       return action.state;
+    case 'workspace/replace':
+      return action.state;
     default:
       return state;
   }
