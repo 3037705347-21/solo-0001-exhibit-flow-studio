@@ -19,6 +19,7 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'sandbox/apply': return `Applied ${action.changeCount} capacity sandbox change${action.changeCount === 1 ? '' : 's'}`;
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }

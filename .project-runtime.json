@@ -8,6 +8,7 @@
     {"workflow_id": "curate-object-set", "command": "npx playwright test e2e/collection.spec.ts"},
     {"workflow_id": "build-visitor-journey", "command": "npx playwright test e2e/journey.spec.ts"},
     {"workflow_id": "review-to-readiness", "command": "npx playwright test e2e/review.spec.ts"},
-    {"workflow_id": "compare-scenarios", "command": "npx playwright test e2e/insights.spec.ts"}
+    {"workflow_id": "compare-scenarios", "command": "npx playwright test e2e/insights.spec.ts"},
+    {"workflow_id": "sandbox-capacity-changes", "command": "npx playwright test e2e/sandbox.spec.ts"}
   ]
 }

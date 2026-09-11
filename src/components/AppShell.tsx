@@ -1,4 +1,4 @@
-import { BookOpen, Boxes, ChevronRight, CircleHelp, Compass, Gauge, LayoutDashboard, RotateCcw, Settings2, Sparkles, SunMedium } from 'lucide-react';
+import { BookOpen, Boxes, ChevronRight, CircleHelp, Compass, FlaskConical, Gauge, LayoutDashboard, RotateCcw, Settings2, Sparkles, SunMedium } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useWorkspace } from '../state/WorkspaceContext';
 import { Badge } from './Badge';
@@ -8,6 +8,7 @@ const navigation = [
   { to: '/collection', label: 'Collection', icon: Boxes, detail: 'Objects & metadata' },
   { to: '/journey', label: 'Visitor journey', icon: Compass, detail: 'Zones & sequence' },
   { to: '/review', label: 'Review desk', icon: BookOpen, detail: 'Findings & readiness' },
+  { to: '/sandbox', label: 'Capacity sandbox', icon: FlaskConical, detail: 'Trial changes' },
   { to: '/insights', label: 'Insights', icon: Gauge, detail: 'Scenario planning' },
 ];
 

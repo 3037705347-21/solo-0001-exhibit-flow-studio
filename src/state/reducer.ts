@@ -95,6 +95,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'sandbox/apply':
+      return stamp(regressReadyProject(action.state));
     case 'workspace/reset':
       return action.state;
     default:

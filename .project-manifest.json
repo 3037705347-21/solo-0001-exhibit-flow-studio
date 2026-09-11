@@ -10,6 +10,7 @@
     {"id": "journey", "path": "src/features/journey", "responsibility": "zone planning, placement transitions, and constraint feedback"},
     {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, and snapshot export"},
     {"id": "insights", "path": "src/features/insights", "responsibility": "scenario projection and plan-level analysis"},
+    {"id": "sandbox", "path": "src/features/sandbox", "responsibility": "capacity sandbox composition, non-destructive trial evaluation, and version-checked batch application"},
     {"id": "components", "path": "src/components", "responsibility": "shared navigation, dialogs, feedback, charts, and UI primitives"}
   ],
   "complexity": {
@@ -55,6 +56,16 @@
       "failure": "out-of-range inputs are constrained and baseline state remains intact",
       "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
       "module_ids": ["app", "insights", "state", "domain", "components"]
+    },
+    {
+      "id": "sandbox-capacity-changes",
+      "name": "Sandbox capacity changes",
+      "entry": "browser route /sandbox",
+      "steps": ["start a sandbox to freeze the current plan version", "combine object moves, an unrecorded object, and zone rule changes", "review live per-zone occupancy, conflicts, key object and role diffs", "apply the batch atomically or discard to fully restore"],
+      "success": "an unchanged, valid batch applies in one commit and persists; discarding restores the workspace exactly",
+      "failure": "plan version drift or a single invalid operation blocks the whole batch with guidance to re-run the trial against the latest plan",
+      "verification": "Playwright covers successful application, version conflict across tabs, a single conflicting move, and cancellation",
+      "module_ids": ["app", "sandbox", "state", "domain", "components"]
     }
   ]
 }

@@ -10,4 +10,5 @@ export type WorkspaceAction =
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
+  | { type: 'sandbox/apply'; state: WorkspaceState; changeCount: number }
   | { type: 'workspace/reset'; state: WorkspaceState };

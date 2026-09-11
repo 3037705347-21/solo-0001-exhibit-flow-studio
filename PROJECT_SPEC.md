@@ -39,6 +39,10 @@ The user opens the review view, creates a finding linked to an object or zone, m
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
 
+### 5. Sandbox capacity changes
+
+The user opens the capacity sandbox and freezes the current plan version, then combines object moves between zones, an unrecorded object, and zone rule changes (dwell capacity, object limit, lighting, seating) without touching the workspace. The trial engine reports live per-zone occupancy, conflicts, key object and narrative-role diffs, and readiness impact. When the user applies the batch, it commits atomically only if the live plan still matches the frozen version and every operation succeeds; a version conflict or invalid operation stops the apply and explains how to re-run the trial against the latest plan. Discarding restores the workspace exactly. Sandbox results never mutate readiness state, exports, or local storage until applied.
+
 ## State and rules
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
@@ -50,6 +54,8 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
+- Capacity sandbox batches are evaluated against a frozen plan version; they commit atomically only when the live plan version is unchanged and every staged operation is valid.
+- Sandbox trials are in-memory derived state and must never alter readiness results, snapshot exports, or local storage until the user applies the batch.
 
 ## Modules and dependency direction
 
@@ -63,7 +69,7 @@ Feature pages call state commands. State commands validate through the domain mo
 
 ## Public interfaces
 
-- Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
+- Browser routes: `/collection`, `/journey`, `/review`, `/sandbox`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
 - Local persistence key: `exhibit-flow.workspace.v1`.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.

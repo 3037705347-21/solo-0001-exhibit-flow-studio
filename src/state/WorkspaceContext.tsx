@@ -3,9 +3,10 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
+import { commitCapacitySandbox, planFingerprint, type SandboxChange, type SandboxConflict } from '../domain/sandbox';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import { loadWorkspace, parseWorkspace, saveWorkspace, STORAGE_KEY } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -15,8 +16,14 @@ interface CommandResult<T = undefined> {
   message?: string;
 }
 
+export type SandboxApplyResult =
+  | { ok: true }
+  | { ok: false; reason: 'version-conflict'; currentVersion: string; expectedVersion: string; message: string }
+  | { ok: false; reason: 'invalid-operation'; conflicts: SandboxConflict[]; failures: { changeId: string; message?: string }[]; message: string };
+
 interface WorkspaceContextValue {
   state: WorkspaceState;
+  planVersion: string;
   storageHealthy: boolean;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
@@ -28,6 +35,7 @@ interface WorkspaceContextValue {
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
+  applyCapacitySandbox: (changes: SandboxChange[], baseVersion: string) => SandboxApplyResult;
   resetWorkspace: () => void;
 }
 
@@ -40,6 +48,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
+
+  // Adopt plan changes saved in another tab/window so sandboxes detect them as version drift.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || !event.newValue) return;
+      const incoming = parseWorkspace(event.newValue);
+      if (incoming) dispatch({ type: 'workspace/reset', state: incoming });
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
     const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
@@ -136,10 +155,37 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
+  const applyCapacitySandbox = useCallback((changes: SandboxChange[], baseVersion: string): SandboxApplyResult => {
+    const result = commitCapacitySandbox(state, changes, baseVersion);
+    if (result.outcome === 'version-conflict') {
+      return {
+        ok: false,
+        reason: 'version-conflict',
+        currentVersion: result.currentVersion,
+        expectedVersion: result.expectedVersion,
+        message: 'The plan was changed elsewhere after this sandbox started. Discard the sandbox and re-run the same changes against the latest plan before applying.',
+      };
+    }
+    if (result.outcome === 'invalid-operation') {
+      return {
+        ok: false,
+        reason: 'invalid-operation',
+        conflicts: result.conflicts,
+        failures: result.failures,
+        message: 'One or more sandbox changes no longer apply. Remove or fix the flagged change, then retry.',
+      };
+    }
+    dispatch({ type: 'sandbox/apply', state: result.state, changeCount: changes.length });
+    return { ok: true };
+  }, [state]);
+
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
+
+  const planVersion = useMemo(() => planFingerprint(state), [state]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
+    planVersion,
     storageHealthy,
     upsertArtifact,
     removeArtifact,
@@ -151,8 +197,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    applyCapacitySandbox,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, planVersion, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, applyCapacitySandbox, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
