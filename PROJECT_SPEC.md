@@ -39,6 +39,10 @@ The user opens the review view, creates a finding linked to an object or zone, m
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
 
+### 5. Versioned workspace migration and recovery
+
+The user exports the current workspace to a versioned file that can be re-imported, and restores a workspace exported by an older or a newer build. After a file is chosen, the app detects its source schema version, runs ordered migration steps, and shows a reviewable report of every record that will be added (defaulted), kept, invalidated, or needs a human decision because it references a missing record. The restore itself is transactional: the existing workspace is copied to a backup slot before anything is overwritten, any migration or write failure leaves the original workspace and storage usable, and the restored workspace can be rolled back within the session. If the process is interrupted mid-write, the next startup detects the backup and rolls back automatically. The built-in sample plan is validated through the same structural path as imports.
+
 ## State and rules
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
@@ -65,8 +69,10 @@ Feature pages call state commands. State commands validate through the domain mo
 
 - Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
-- Local persistence key: `exhibit-flow.workspace.v1`.
+- Local persistence key: `exhibit-flow.workspace.v1` (content is the current schema version).
+- Pre-restore safety backup key: `exhibit-flow.workspace.restore-backup.v1`.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.
+- Re-importable workspace download: `exhibit-flow-workspace-v<version>-<date>.json`.
 
 ## Validation plan
 

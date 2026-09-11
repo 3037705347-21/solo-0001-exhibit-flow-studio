@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { serializeWorkspace, parseWorkspaceFile } from '../domain/export';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
@@ -7,6 +8,8 @@ import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferen
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
+import { applyConfirmations, planWorkspaceMigration, type ConfirmResolution, type MigrationPlan } from './migrations';
+import { commitRestore, RestoreHandle, type RestoreOutcome } from './restore';
 
 interface CommandResult<T = undefined> {
   ok: boolean;
@@ -18,6 +21,7 @@ interface CommandResult<T = undefined> {
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
+  startupNotice: string | null;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
@@ -29,15 +33,37 @@ interface WorkspaceContextValue {
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
+  exportWorkspace: () => CommandResult<string>;
+  previewImport: (contents: string) => CommandResult<MigrationPlan>;
+  restoreFromPlan: (plan: MigrationPlan, resolutions: Record<string, ConfirmResolution>) => CommandResult;
+  undoLastRestore: () => CommandResult;
+  acceptLastRestore: () => CommandResult;
+  dismissStartupNotice: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
+  const [initial] = useState(() => loadWorkspace());
+  const [state, dispatch] = useReducer(workspaceReducer, initial.state);
   const [storageHealthy, setStorageHealthy] = useState(true);
+  const [startupNotice, setStartupNotice] = useState<string | null>(
+    initial.recoveredFromInterruption
+      ? 'An interrupted workspace restore was detected; the previous workspace was rolled back automatically.'
+      : initial.fellBackToSeed
+        ? 'The stored workspace could not be read; the sample plan was loaded instead.'
+        : null,
+  );
+  const restoreHandleRef = useRef<RestoreHandle | null>(null);
+  // Restore/rollback write storage transactionally themselves; skip the next
+  // autosave so the reducer's own save cannot interleave with the backup slot.
+  const skipNextSaveRef = useRef(false);
 
   useEffect(() => {
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
 
@@ -138,9 +164,66 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
+  const exportWorkspace = useCallback((): CommandResult<string> => {
+    const serialized = serializeWorkspace(state);
+    if (!serialized) return { ok: false, message: 'The current workspace failed validation and cannot be exported.' };
+    return { ok: true, value: serialized };
+  }, [state]);
+
+  const previewImport = useCallback((contents: string): CommandResult<MigrationPlan> => {
+    const parsed = parseWorkspaceFile(contents);
+    if (!parsed.ok) return { ok: false, message: parsed.message };
+    const plan = planWorkspaceMigration(parsed.value);
+    if (plan.fatal.length > 0 || !plan.candidate) {
+      return { ok: false, message: plan.fatal[0]?.message ?? 'Nothing in this file can be restored safely.' };
+    }
+    return { ok: true, value: plan };
+  }, []);
+
+  const restoreFromPlan = useCallback((plan: MigrationPlan, resolutions: Record<string, ConfirmResolution>): CommandResult => {
+    let restored: WorkspaceState;
+    try {
+      restored = applyConfirmations(plan, resolutions);
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The migration could not be finalized.' };
+    }
+    const outcome = commitRestore(restored, localStorage);
+    if (!outcome.ok) {
+      return { ok: false, message: outcome.message };
+    }
+    restoreHandleRef.current = outcome.handle;
+    skipNextSaveRef.current = true;
+    dispatch({ type: 'workspace/replace', state: restored });
+    return { ok: true };
+  }, [restoreHandleRef]);
+
+  const undoLastRestore = useCallback((): CommandResult => {
+    const handle = restoreHandleRef.current;
+    if (!handle) return { ok: false, message: 'There is no restore to undo in this session.' };
+    const outcome: RestoreOutcome = handle.rollback();
+    if (!outcome.ok) return { ok: false, message: outcome.message };
+    restoreHandleRef.current = null;
+    const reloaded = loadWorkspace({ recover: false });
+    skipNextSaveRef.current = true;
+    dispatch({ type: 'workspace/replace', state: reloaded.state });
+    return { ok: true };
+  }, [restoreHandleRef]);
+
+  const acceptLastRestore = useCallback((): CommandResult => {
+    const handle = restoreHandleRef.current;
+    if (!handle) return { ok: true };
+    const outcome = handle.finalize();
+    if (!outcome.ok) return { ok: false, message: outcome.message };
+    restoreHandleRef.current = null;
+    return { ok: true };
+  }, [restoreHandleRef]);
+
+  const dismissStartupNotice = useCallback(() => setStartupNotice(null), []);
+
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
+    startupNotice,
     upsertArtifact,
     removeArtifact,
     assignArtifact,
@@ -152,7 +235,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+    exportWorkspace,
+    previewImport,
+    restoreFromPlan,
+    undoLastRestore,
+    acceptLastRestore,
+    dismissStartupNotice,
+  }), [state, storageHealthy, startupNotice, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace, exportWorkspace, previewImport, restoreFromPlan, undoLastRestore, acceptLastRestore, dismissStartupNotice]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

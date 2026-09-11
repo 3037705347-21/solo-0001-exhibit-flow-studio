@@ -5,6 +5,14 @@ export type IssueSeverity = 'note' | 'warning' | 'critical';
 export type IssueStatus = 'open' | 'in-progress' | 'resolved';
 export type AccessibilityNeed = 'none' | 'seating' | 'audio' | 'tactile-alternative';
 
+export const PROJECT_STAGES = ['draft', 'review', 'ready'] as const;
+export const NARRATIVE_ROLES = ['threshold', 'context', 'turning-point', 'reflection'] as const;
+export const SENSITIVITIES = ['standard', 'low-light', 'fragile'] as const;
+export const ISSUE_SEVERITIES = ['note', 'warning', 'critical'] as const;
+export const ISSUE_STATUSES = ['open', 'in-progress', 'resolved'] as const;
+export const ACCESSIBILITY_NEEDS = ['none', 'seating', 'audio', 'tactile-alternative'] as const;
+export const PACES = ['focused', 'balanced', 'leisurely'] as const;
+
 export interface Dimensions {
   width: number;
   height: number;
@@ -65,6 +73,16 @@ export interface PlanningPreferences {
   pace: 'focused' | 'balanced' | 'leisurely';
   accessibilityPriority: number;
   groupSize: number;
+  /**
+   * Preferred number of minutes visitors pause between zones. Introduced with
+   * workspace version 2; older exports are migrated with a sensible default.
+   */
+  transitionBufferMinutes?: number;
+  /**
+   * Whether the sample-plan reminder is shown on the insights page. Introduced
+   * with workspace version 2; older exports are migrated with `true`.
+   */
+  showTransitionCues?: boolean;
 }
 
 export interface ExhibitProject {
@@ -77,14 +95,29 @@ export interface ExhibitProject {
   lastReadinessCheck?: string;
 }
 
+/** Current on-disk workspace schema version. Older files are migrated to this. */
+export const WORKSPACE_SCHEMA_VERSION = 2;
+
 export interface WorkspaceState {
-  version: 1;
+  version: typeof WORKSPACE_SCHEMA_VERSION;
   project: ExhibitProject;
   artifacts: Artifact[];
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
   lastSavedAt?: string;
+}
+
+/**
+ * Envelope for files exported by the workspace transfer flow. It is distinct
+ * from the readiness {@link Snapshot} so imports can tell full workspaces
+ * apart from read-only snapshots.
+ */
+export interface WorkspaceFile {
+  kind: 'exhibit-flow-workspace';
+  fileVersion: 1;
+  exportedAt: string;
+  workspace: WorkspaceState;
 }
 
 export interface ArtifactDraft {

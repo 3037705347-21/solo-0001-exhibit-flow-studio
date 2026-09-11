@@ -13,7 +13,7 @@
     {"id": "components", "path": "src/components", "responsibility": "shared navigation, dialogs, feedback, charts, and UI primitives"}
   ],
   "complexity": {
-    "mechanisms": ["state_transition", "error_propagation", "resource_lifecycle", "validation_boundary", "derived_projection"]
+    "mechanisms": ["state_transition", "error_propagation", "resource_lifecycle", "validation_boundary", "derived_projection", "versioned_migration", "transactional_rollback"]
   },
   "workflows": [
     {
@@ -55,6 +55,16 @@
       "failure": "out-of-range inputs are constrained and baseline state remains intact",
       "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
       "module_ids": ["app", "insights", "state", "domain", "components"]
+    },
+    {
+      "id": "versioned-workspace-recovery",
+      "name": "Versioned workspace migration and recovery",
+      "entry": "top bar Import & restore control",
+      "steps": ["detect the source schema version of an exported file", "review ordered migration steps with added, kept, invalidated, and needs-confirmation records", "run a transactional restore with backup and rollback"],
+      "success": "a reviewed restore replaces the workspace and can be undone; re-exported files re-import",
+      "failure": "migration or write failures and interrupted restores leave the previous workspace and storage usable",
+      "verification": "Playwright covers current, legacy, missing-field, broken-reference, and interrupted-restore inputs",
+      "module_ids": ["app", "state", "domain", "components"]
     }
   ]
 }

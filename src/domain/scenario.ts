@@ -1,4 +1,4 @@
-import type { JourneyAnalysis, ScenarioInput, ScenarioProjection, WorkspaceState } from './models';
+import type { JourneyAnalysis, PlanningPreferences, ScenarioInput, ScenarioProjection, WorkspaceState } from './models';
 
 const PACE_MULTIPLIER: Record<ScenarioInput['pace'], number> = {
   focused: 0.78,
@@ -6,11 +6,15 @@ const PACE_MULTIPLIER: Record<ScenarioInput['pace'], number> = {
   leisurely: 1.28,
 };
 
-export function clampScenario(input: ScenarioInput): ScenarioInput {
+export function clampScenario(input: ScenarioInput & Partial<Pick<PlanningPreferences, 'transitionBufferMinutes' | 'showTransitionCues'>>): PlanningPreferences {
   return {
     pace: input.pace,
     accessibilityPriority: Math.max(0, Math.min(100, Math.round(input.accessibilityPriority))),
     groupSize: Math.max(1, Math.min(30, Math.round(input.groupSize))),
+    ...(typeof input.transitionBufferMinutes === 'number'
+      ? { transitionBufferMinutes: Math.max(0, Math.min(30, input.transitionBufferMinutes)) }
+      : {}),
+    ...(typeof input.showTransitionCues === 'boolean' ? { showTransitionCues: input.showTransitionCues } : {}),
   };
 }
 
@@ -22,8 +26,12 @@ export function projectScenario(
   const input = clampScenario(rawInput);
   const groupDrag = 1 + Math.max(0, input.groupSize - 4) * 0.025;
   const accessibilityPause = 1 + input.accessibilityPriority * 0.0015;
+  // Version 2 workspaces carry a planned pause between zones; older exports
+  // migrate with a 0-minute buffer so legacy projections stay unchanged.
+  const transitionBuffer = state.preferences.transitionBufferMinutes ?? 0;
+  const transitionMinutes = Math.max(0, state.zones.length - 1) * transitionBuffer;
   const durationMinutes = Math.round(
-    analysis.totalDwellMinutes * PACE_MULTIPLIER[input.pace] * groupDrag * accessibilityPause,
+    analysis.totalDwellMinutes * PACE_MULTIPLIER[input.pace] * groupDrag * accessibilityPause + transitionMinutes,
   );
   const seatedNeeds = state.artifacts.filter((artifact) => artifact.accessibilityNeed === 'seating').length;
   const audioNeeds = state.artifacts.filter((artifact) => artifact.accessibilityNeed === 'audio').length;

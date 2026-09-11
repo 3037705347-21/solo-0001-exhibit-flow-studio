@@ -2,7 +2,7 @@ import type { WorkspaceState } from '../domain/models';
 
 export function createSeedWorkspace(): WorkspaceState {
   return {
-    version: 1,
+    version: 2,
     project: {
       id: 'project-afterlight',
       title: 'Afterlight: Material Memory',
@@ -269,6 +269,8 @@ export function createSeedWorkspace(): WorkspaceState {
       pace: 'balanced',
       accessibilityPriority: 70,
       groupSize: 6,
+      transitionBufferMinutes: 3,
+      showTransitionCues: true,
     },
     lastSavedAt: '2026-09-01T14:30:00.000Z',
   };

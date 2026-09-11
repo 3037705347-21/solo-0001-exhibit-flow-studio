@@ -97,6 +97,10 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       });
     case 'workspace/reset':
       return action.state;
+    case 'workspace/replace':
+      // Restored workspaces already carry their own lastSavedAt stamp from the
+      // transactional restore; do not re-stamp them.
+      return action.state;
     default:
       return state;
   }

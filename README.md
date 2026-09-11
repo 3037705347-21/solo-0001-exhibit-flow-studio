@@ -35,6 +35,13 @@ npm run check       # all checks in sequence
 - Object records accept accession ID, title, maker, period, medium, origin, dimensions, dwell time, narrative role, sensitivity, access need, tags, and key-object status.
 - Review findings accept severity, owner, optional zone/object links, and decision context.
 - A successful readiness check enables a JSON file named `exhibit-flow-snapshot-YYYY-MM-DD.json` containing the project, sequenced zones, objects, summary metrics, and unresolved non-blocking issues.
+- **Export workspace** downloads `exhibit-flow-workspace-v2-YYYY-MM-DD.json`, a versioned envelope of the whole workspace. **Import & restore** detects the source version, shows ordered migration steps and every added / kept / invalidated / needs-confirmation record, then performs a transactional restore that can be undone. Readiness snapshots are intentionally not restorable.
+
+## Versioned migration and recovery
+
+Every workspace-shaped input — imported files, automatic startup loads, and the built-in sample plan — passes through `normalizeWorkspaceShape` in `src/domain/workspaceValidation.ts`. Import planning (`planWorkspaceMigration` in `src/state/migrations.ts`) is pure: it detects the source version (`0` for pre-versioned exports, `1`, or the current `2`), produces one report per ordered migration step, and never writes. Records referencing missing artifacts or zones are surfaced as per-record confirmations; nothing is guessed.
+
+The actual write runs through `commitRestore` in `src/state/restore.ts`: the existing workspace is copied to `exhibit-flow.workspace.restore-backup.v1` before the main key is replaced, and a failed write rolls straight back. A backup left behind by a closed tab or crash triggers automatic rollback on the next startup (`recoverInterruptedRestore`), so an interrupted restore can never strand the team on a half-written workspace.
 
 ## Design notes
 
