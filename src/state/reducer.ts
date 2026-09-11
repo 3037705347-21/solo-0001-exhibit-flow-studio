@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { recordIssueEdit, recordIssueReassignment } from '../domain/issueHistory';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -81,7 +82,45 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject({
         ...state,
         issues: state.issues.map((issue) =>
-          issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
+          issue.id === action.issueId
+            ? transitionIssue(
+                issue,
+                action.status,
+                action.at ?? new Date(),
+                action.actor ?? issue.owner,
+                action.note,
+              )
+            : issue,
+        ),
+      }));
+    case 'issue/edit':
+      return stamp(regressReadyProject({
+        ...state,
+        issues: state.issues.map((issue) =>
+          issue.id === action.issueId
+            ? recordIssueEdit(
+                issue,
+                action.patch,
+                action.at ?? new Date(),
+                action.actor ?? issue.owner,
+                action.note,
+              )
+            : issue,
+        ),
+      }));
+    case 'issue/reassign':
+      return stamp(regressReadyProject({
+        ...state,
+        issues: state.issues.map((issue) =>
+          issue.id === action.issueId
+            ? recordIssueReassignment(
+                issue,
+                action.owner,
+                action.at ?? new Date(),
+                action.actor ?? action.owner,
+                action.note,
+              )
+            : issue,
         ),
       }));
     case 'preferences/update':

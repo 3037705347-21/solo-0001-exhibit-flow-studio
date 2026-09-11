@@ -3,6 +3,7 @@ export type NarrativeRole = 'threshold' | 'context' | 'turning-point' | 'reflect
 export type Sensitivity = 'standard' | 'low-light' | 'fragile';
 export type IssueSeverity = 'note' | 'warning' | 'critical';
 export type IssueStatus = 'open' | 'in-progress' | 'resolved';
+export type IssueEventType = 'created' | 'edited' | 'reassigned' | 'started' | 'resolved' | 'reopened';
 export type AccessibilityNeed = 'none' | 'seating' | 'audio' | 'tactile-alternative';
 
 export interface Dimensions {
@@ -47,6 +48,34 @@ export interface Zone {
   artifactIds: string[];
 }
 
+/**
+ * An immutable decision-record entry for a review finding. Events are
+ * append-only: once recorded they are never updated or removed, and the
+ * current finding state must be explainable by replaying the chain.
+ */
+export interface IssueEvent {
+  readonly id: string;
+  readonly issueId: string;
+  readonly type: IssueEventType;
+  readonly at: string;
+  readonly actor: string;
+  readonly seq: number;
+  /** True for the single synthetic event generated when migrating a legacy finding. */
+  readonly backfilled?: boolean;
+  /** Free-text rationale captured on resolve / reopen. */
+  readonly note?: string;
+  /** Snapshot of finding fields captured for created and edited events. */
+  readonly snapshot?: {
+    title?: string;
+    description?: string;
+    severity?: IssueSeverity;
+    zoneId?: string;
+    artifactId?: string;
+  };
+  /** Owner after a reassignment. */
+  readonly owner?: string;
+}
+
 export interface ReviewIssue {
   id: string;
   title: string;
@@ -59,7 +88,12 @@ export interface ReviewIssue {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+  /** Append-only decision chain, ordered by seq. */
+  events: IssueEvent[];
 }
+
+/** A finding projection without its append-only chain (used in exports). */
+export type ReviewIssueSummary = Omit<ReviewIssue, 'events'>;
 
 export interface PlanningPreferences {
   pace: 'focused' | 'balanced' | 'leisurely';
@@ -186,5 +220,10 @@ export interface Snapshot {
     readinessScore: number;
   };
   zones: Array<Zone & { artifacts: Artifact[] }>;
-  unresolvedIssues: ReviewIssue[];
+  unresolvedIssues: ReviewIssueSummary[];
+  /**
+   * Present only when the export explicitly includes decision records.
+   * Every finding (resolved or not) appears with its full immutable chain.
+   */
+  issueHistory?: Array<ReviewIssue & { historySummary: { eventCount: number; reopenCount: number; resolutionCount: number } }>;
 }

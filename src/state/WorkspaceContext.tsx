@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { canTransitionStatus, issueFromInput } from '../domain/issueHistory';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueSeverity, IssueStatus, PlanningPreferences, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -23,11 +24,17 @@ interface WorkspaceContextValue {
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
-  addIssue: (draft: IssueDraft) => CommandResult;
-  transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
+  addIssue: (draft: IssueDraft) => CommandResult<ReviewIssue>;
+  transitionReviewIssue: (issueId: string, status: IssueStatus, options?: { actor?: string; note?: string }) => CommandResult;
+  editIssue: (
+    issueId: string,
+    patch: { title?: string; description?: string; severity?: IssueSeverity; zoneId?: string; artifactId?: string },
+    options?: { actor?: string; note?: string },
+  ) => CommandResult;
+  reassignIssue: (issueId: string, owner: string, options?: { actor?: string; note?: string }) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
-  createSnapshot: () => CommandResult<Snapshot>;
+  createSnapshot: (options?: { includeHistory?: boolean }) => CommandResult<Snapshot>;
   resetWorkspace: () => void;
 }
 
@@ -84,38 +91,81 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const addIssue = useCallback((draft: IssueDraft): CommandResult => {
+  const addIssue = useCallback((draft: IssueDraft): CommandResult<ReviewIssue> => {
     if (!draft.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
     if (draft.description.trim().length < 16) return { ok: false, errors: { description: 'Add at least 16 characters of context.' } };
     if (!draft.owner.trim()) return { ok: false, errors: { owner: 'Assign an owner.' } };
-    const now = new Date().toISOString();
-    dispatch({
-      type: 'issue/add',
-      issue: {
-        id: createId('issue'),
-        title: draft.title.trim(),
-        description: draft.description.trim(),
-        severity: draft.severity,
-        status: 'open',
-        owner: draft.owner.trim(),
-        zoneId: draft.zoneId || undefined,
-        artifactId: draft.artifactId || undefined,
-        createdAt: now,
-        updatedAt: now,
-      },
+    const issue = issueFromInput(createId('issue'), {
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      severity: draft.severity,
+      owner: draft.owner.trim(),
+      zoneId: draft.zoneId || undefined,
+      artifactId: draft.artifactId || undefined,
     });
-    return { ok: true };
+    dispatch({ type: 'issue/add', issue });
+    return { ok: true, value: issue };
   }, []);
 
-  const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
+  const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus, options?: { actor?: string; note?: string }): CommandResult => {
     const issue = state.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
-    try {
-      dispatch({ type: 'issue/transition', issueId, status });
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
+    if (issue.status === status) return { ok: true };
+    // Validate against the lifecycle before dispatching so an illegal move
+    // surfaces as a command failure instead of crashing the reducer.
+    const allowed = canTransitionStatus(issue.status, status);
+    if (!allowed) {
+      return { ok: false, message: `Cannot move a review finding from ${issue.status} to ${status}.` };
     }
+    dispatch({
+      type: 'issue/transition',
+      issueId,
+      status,
+      ...(options?.actor ? { actor: options.actor } : {}),
+      ...(options?.note?.trim() ? { note: options.note.trim() } : {}),
+    });
+    return { ok: true };
+  }, [state.issues]);
+
+  const editIssue = useCallback((
+    issueId: string,
+    patch: { title?: string; description?: string; severity?: IssueSeverity; zoneId?: string; artifactId?: string },
+    options?: { actor?: string; note?: string },
+  ): CommandResult => {
+    const issue = state.issues.find((candidate) => candidate.id === issueId);
+    if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
+    if (patch.title !== undefined && !patch.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
+    if (patch.description !== undefined && patch.description.trim().length < 16) {
+      return { ok: false, errors: { description: 'Add at least 16 characters of context.' } };
+    }
+    dispatch({
+      type: 'issue/edit',
+      issueId,
+      patch: {
+        ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
+        ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+        ...(patch.severity !== undefined ? { severity: patch.severity } : {}),
+        ...(patch.zoneId !== undefined ? { zoneId: patch.zoneId || '' } : {}),
+        ...(patch.artifactId !== undefined ? { artifactId: patch.artifactId || '' } : {}),
+      },
+      ...(options?.actor ? { actor: options.actor } : {}),
+      ...(options?.note?.trim() ? { note: options.note.trim() } : {}),
+    });
+    return { ok: true };
+  }, [state.issues]);
+
+  const reassignIssue = useCallback((issueId: string, owner: string, options?: { actor?: string; note?: string }): CommandResult => {
+    const issue = state.issues.find((candidate) => candidate.id === issueId);
+    if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
+    if (!owner.trim()) return { ok: false, errors: { owner: 'Assign an owner.' } };
+    dispatch({
+      type: 'issue/reassign',
+      issueId,
+      owner: owner.trim(),
+      ...(options?.actor ? { actor: options.actor } : {}),
+      ...(options?.note?.trim() ? { note: options.note.trim() } : {}),
+    });
+    return { ok: true };
   }, [state.issues]);
 
   const updatePreferences = useCallback((preferences: PlanningPreferences) => {
@@ -129,11 +179,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return result;
   }, [state]);
 
-  const createSnapshot = useCallback((): CommandResult<Snapshot> => {
+  const createSnapshot = useCallback((options?: { includeHistory?: boolean }): CommandResult<Snapshot> => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const readiness = evaluateReadiness(state, analysis);
     if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
-    return { ok: true, value: buildSnapshot(state, analysis, readiness) };
+    return { ok: true, value: buildSnapshot(state, analysis, readiness, options) };
   }, [state]);
 
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
@@ -148,11 +198,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     reorderArtifact,
     addIssue,
     transitionReviewIssue,
+    editIssue,
+    reassignIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, editIssue, reassignIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

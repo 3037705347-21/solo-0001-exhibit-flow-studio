@@ -1,4 +1,5 @@
-import type { WorkspaceState } from '../domain/models';
+import { issueFromInput, recordIssueStatus } from '../domain/issueHistory';
+import type { ReviewIssue, WorkspaceState } from '../domain/models';
 
 export function createSeedWorkspace(): WorkspaceState {
   return {
@@ -227,44 +228,7 @@ export function createSeedWorkspace(): WorkspaceState {
         artifactIds: ['artifact-bowl', 'artifact-tape'],
       },
     ],
-    issues: [
-      {
-        id: 'issue-audio-transcript',
-        title: 'Add transcript beside oral history station',
-        description: 'The current audio treatment needs a synchronized transcript and a printed fallback.',
-        severity: 'critical',
-        status: 'in-progress',
-        zoneId: 'zone-after',
-        artifactId: 'artifact-tape',
-        owner: 'Mara Chen',
-        createdAt: '2026-08-20T10:00:00.000Z',
-        updatedAt: '2026-09-01T14:30:00.000Z',
-      },
-      {
-        id: 'issue-entry-copy',
-        title: 'Reduce entry panel copy',
-        description: 'The opening panel currently competes with the lantern sightline and should be shortened.',
-        severity: 'warning',
-        status: 'open',
-        zoneId: 'zone-arrival',
-        owner: 'Theo James',
-        createdAt: '2026-08-23T12:00:00.000Z',
-        updatedAt: '2026-08-23T12:00:00.000Z',
-      },
-      {
-        id: 'issue-quilt-light',
-        title: 'Confirm quilt lux rotation',
-        description: 'Conservation confirmed the zone level; document the planned three-month rotation.',
-        severity: 'note',
-        status: 'resolved',
-        zoneId: 'zone-common',
-        artifactId: 'artifact-quilt',
-        owner: 'Rina Solberg',
-        createdAt: '2026-08-18T09:00:00.000Z',
-        updatedAt: '2026-08-28T16:00:00.000Z',
-        resolvedAt: '2026-08-28T16:00:00.000Z',
-      },
-    ],
+    issues: buildSeedIssues(),
     preferences: {
       pace: 'balanced',
       accessibilityPriority: 70,
@@ -272,4 +236,69 @@ export function createSeedWorkspace(): WorkspaceState {
     },
     lastSavedAt: '2026-09-01T14:30:00.000Z',
   };
+}
+
+function buildSeedIssues(): ReviewIssue[] {
+  const audioTranscript = issueFromInput(
+    'issue-audio-transcript',
+    {
+      title: 'Add transcript beside oral history station',
+      description: 'The current audio treatment needs a synchronized transcript and a printed fallback.',
+      severity: 'critical',
+      zoneId: 'zone-after',
+      artifactId: 'artifact-tape',
+      owner: 'Mara Chen',
+    },
+    new Date('2026-08-20T10:00:00.000Z'),
+    'Mara Chen',
+  );
+  const startedAudio = recordIssueStatus(
+    audioTranscript,
+    'in-progress',
+    new Date('2026-09-01T14:30:00.000Z'),
+    'Mara Chen',
+    'Floor team confirmed the printed fallback will ship with the station.',
+  );
+
+  const entryCopy = issueFromInput(
+    'issue-entry-copy',
+    {
+      title: 'Reduce entry panel copy',
+      description: 'The opening panel currently competes with the lantern sightline and should be shortened.',
+      severity: 'warning',
+      zoneId: 'zone-arrival',
+      owner: 'Theo James',
+    },
+    new Date('2026-08-23T12:00:00.000Z'),
+    'Theo James',
+  );
+
+  const quiltLight = issueFromInput(
+    'issue-quilt-light',
+    {
+      title: 'Confirm quilt lux rotation',
+      description: 'Conservation confirmed the zone level; document the planned three-month rotation.',
+      severity: 'note',
+      zoneId: 'zone-common',
+      artifactId: 'artifact-quilt',
+      owner: 'Rina Solberg',
+    },
+    new Date('2026-08-18T09:00:00.000Z'),
+    'Rina Solberg',
+  );
+  const quiltInProgress = recordIssueStatus(
+    quiltLight,
+    'in-progress',
+    new Date('2026-08-20T10:00:00.000Z'),
+    'Rina Solberg',
+  );
+  const quiltResolved = recordIssueStatus(
+    quiltInProgress,
+    'resolved',
+    new Date('2026-08-28T16:00:00.000Z'),
+    'Rina Solberg',
+    'Conservation signed off; rotation logged in the install checklist.',
+  );
+
+  return [startedAudio, entryCopy, quiltResolved];
 }

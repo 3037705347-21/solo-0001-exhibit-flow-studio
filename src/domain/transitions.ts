@@ -1,10 +1,5 @@
+import { IssueHistoryError, recordIssueStatus } from './issueHistory';
 import type { IssueStatus, ProjectStage, ReviewIssue, WorkspaceState } from './models';
-
-const ISSUE_TRANSITIONS: Record<IssueStatus, IssueStatus[]> = {
-  open: ['in-progress'],
-  'in-progress': ['open', 'resolved'],
-  resolved: ['in-progress'],
-};
 
 const PROJECT_TRANSITIONS: Record<ProjectStage, ProjectStage[]> = {
   draft: ['review'],
@@ -19,18 +14,21 @@ export class TransitionError extends Error {
   }
 }
 
-export function transitionIssue(issue: ReviewIssue, target: IssueStatus, at = new Date()): ReviewIssue {
-  if (issue.status === target) return issue;
-  if (!ISSUE_TRANSITIONS[issue.status].includes(target)) {
-    throw new TransitionError(`Cannot move a review finding from ${issue.status} to ${target}.`, issue.status, target);
+export function transitionIssue(
+  issue: ReviewIssue,
+  target: IssueStatus,
+  at = new Date(),
+  actor = issue.owner,
+  note?: string,
+): ReviewIssue {
+  try {
+    return recordIssueStatus(issue, target, at, actor, note);
+  } catch (error) {
+    if (error instanceof IssueHistoryError) {
+      throw new TransitionError(error.message, issue.status, target);
+    }
+    throw error;
   }
-  const timestamp = at.toISOString();
-  return {
-    ...issue,
-    status: target,
-    updatedAt: timestamp,
-    resolvedAt: target === 'resolved' ? timestamp : undefined,
-  };
 }
 
 export function transitionProject(state: WorkspaceState, target: ProjectStage): WorkspaceState {

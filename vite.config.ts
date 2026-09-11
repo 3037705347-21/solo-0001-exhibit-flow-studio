@@ -6,7 +6,7 @@ export default defineConfig({
   server: { port: 4173, strictPort: true },
   preview: { port: 4173, strictPort: true },
   test: {
-    environment: 'jsdom',
+    environment: 'node',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },

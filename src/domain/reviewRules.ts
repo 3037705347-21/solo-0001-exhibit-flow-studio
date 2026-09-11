@@ -1,4 +1,10 @@
-import type { JourneyAnalysis, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from './models';
+import { summarizeHistory } from './issueHistory';
+import type { JourneyAnalysis, ReadinessResult, ReviewIssue, ReviewIssueSummary, Snapshot, WorkspaceState } from './models';
+
+function stripEvents(issue: ReviewIssue): ReviewIssueSummary {
+  const { events: _events, ...summary } = issue;
+  return summary;
+}
 
 export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalysis, at = new Date()): ReadinessResult {
   const blockers: string[] = [];
@@ -37,12 +43,17 @@ export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalys
   };
 }
 
-export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, readiness: ReadinessResult): Snapshot {
+export function buildSnapshot(
+  state: WorkspaceState,
+  analysis: JourneyAnalysis,
+  readiness: ReadinessResult,
+  options?: { includeHistory?: boolean },
+): Snapshot {
   if (!readiness.ready) {
     throw new Error('A snapshot can only be created when the plan passes readiness checks.');
   }
   const artifactById = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
-  return {
+  const snapshot: Snapshot = {
     schemaVersion: 1,
     generatedAt: readiness.checkedAt,
     project: { ...state.project, stage: 'ready', lastReadinessCheck: readiness.checkedAt },
@@ -60,8 +71,15 @@ export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, 
           .map((id) => artifactById.get(id))
           .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact)),
       })),
-    unresolvedIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
+    unresolvedIssues: state.issues.filter((issue) => issue.status !== 'resolved').map(stripEvents),
   };
+  if (options?.includeHistory) {
+    snapshot.issueHistory = state.issues.map((issue) => {
+      const { reopenCount, resolutionCount, eventCount } = summarizeHistory(issue);
+      return { ...issue, historySummary: { eventCount, reopenCount, resolutionCount } };
+    });
+  }
+  return snapshot;
 }
 
 export function issueProgress(issues: ReviewIssue[]): number {

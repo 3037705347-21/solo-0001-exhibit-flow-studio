@@ -1,3 +1,4 @@
+import { backfillIssueHistory, reconcileIssue, recordIssueEdit } from '../domain/issueHistory';
 import type { WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
@@ -49,10 +50,26 @@ export function validateReferences(state: WorkspaceState): WorkspaceState {
   return {
     ...state,
     zones: state.zones.map((zone) => ({ ...zone, artifactIds: zone.artifactIds.filter((id) => artifactIds.has(id)) })),
-    issues: state.issues.map((issue) => ({
-      ...issue,
-      zoneId: issue.zoneId && zoneIds.has(issue.zoneId) ? issue.zoneId : undefined,
-      artifactId: issue.artifactId && artifactIds.has(issue.artifactId) ? issue.artifactId : undefined,
-    })),
+    issues: state.issues
+      // Findings created before event history receive one synthetic initial
+      // record so their current state is explainable from the chain.
+      .map((issue) => backfillIssueHistory(issue))
+      // Reference cleanup is a real decision-record edit: the link no longer
+      // resolves, so it is appended to the chain instead of silently mutated.
+      // After the first migration load links are already clear, so this is a
+      // no-op on subsequent loads.
+      .map((issue) => recordIssueEdit(
+        issue,
+        {
+          ...(issue.zoneId && !zoneIds.has(issue.zoneId) ? { zoneId: '' } : {}),
+          ...(issue.artifactId && !artifactIds.has(issue.artifactId) ? { artifactId: '' } : {}),
+        },
+        new Date(),
+        'system',
+        'Dropped link to a zone or object that no longer exists.',
+      ))
+      // Rebuild denormalized fields from the immutable chain.
+      .map((issue) => reconcileIssue(issue))
+      .filter((issue): issue is NonNullable<typeof issue> => Boolean(issue)),
   };
 }

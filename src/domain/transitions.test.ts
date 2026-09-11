@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { TransitionError, transitionIssue } from './transitions';
-import type { ReviewIssue } from './models';
+import { issueFromInput } from './issueHistory';
 
-const issue: ReviewIssue = { id: 'i', title: 'Issue', description: 'Description', severity: 'critical', status: 'open', owner: 'Owner', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+const issue = issueFromInput('i', {
+  title: 'Issue',
+  description: 'Description long enough to be useful.',
+  severity: 'critical',
+  owner: 'Owner',
+}, new Date('2026-01-01T00:00:00.000Z'));
 
 describe('review transitions', () => {
   it('moves an issue through the allowed lifecycle', () => {

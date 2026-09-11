@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReviewIssue, WorkspaceState } from './models';
+import { issueFromInput } from './issueHistory';
 import { createSeedWorkspace } from '../state/seed';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from './zoneChecklist';
 
@@ -9,16 +10,15 @@ function stateWithIssues(extra: ReviewIssue[]): WorkspaceState {
 }
 
 function issue(overrides: Partial<ReviewIssue> & Pick<ReviewIssue, 'id' | 'title' | 'zoneId'>): ReviewIssue {
-  return {
-    description: 'Enough context for a review finding used in tests.',
-    severity: 'warning',
-    status: 'open',
-    owner: 'Jo Renner',
-    artifactId: undefined,
-    createdAt: '2026-09-01T10:00:00.000Z',
-    updatedAt: '2026-09-01T10:00:00.000Z',
-    ...overrides,
-  };
+  const base = issueFromInput(overrides.id, {
+    title: overrides.title,
+    description: overrides.description ?? 'Enough context for a review finding used in tests.',
+    severity: overrides.severity ?? 'warning',
+    owner: overrides.owner ?? 'Jo Renner',
+    zoneId: overrides.zoneId,
+    artifactId: overrides.artifactId,
+  }, new Date('2026-09-01T10:00:00.000Z'));
+  return { ...base, ...overrides, events: overrides.events ?? base.events };
 }
 
 describe('buildZoneChecklist', () => {

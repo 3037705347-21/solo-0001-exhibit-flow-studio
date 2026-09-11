@@ -1,4 +1,4 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, History, ListChecks, MapPin, Pencil, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
@@ -9,9 +9,10 @@ import { SelectField } from '../../components/SelectField';
 import { TextField } from '../../components/TextField';
 import { downloadTextFile } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
-import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
+import { formatDate, formatMinutes, pluralize, titleCase } from '../../domain/formatters';
 import { analyzeJourney } from '../../domain/journeyAnalysis';
-import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
+import { sortEvents, summarizeHistory } from '../../domain/issueHistory';
+import type { IssueDraft, IssueEvent, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
 import { evaluateReadiness } from '../../domain/reviewRules';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
 import { loadReviewUi, saveReviewUi, type ReviewUiState } from '../../state/persistence';
@@ -20,12 +21,18 @@ import { useWorkspace } from '../../state/WorkspaceContext';
 type StatusFilter = IssueStatus | 'all';
 const STATUS_FILTERS: StatusFilter[] = ['all', 'open', 'in-progress', 'resolved'];
 
+type CommandResponse = { ok: boolean; message?: string };
+
 export function ReviewPage() {
-  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
+  const { state, addIssue, transitionReviewIssue, editIssue, reassignIssue, checkReadiness, createSnapshot } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
   const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
+  const [includeHistory, setIncludeHistory] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [decision, setDecision] = useState<{ issue: ReviewIssue; action: 'resolved' | 'reopened' } | null>(null);
+  const [editing, setEditing] = useState<ReviewIssue | null>(null);
+  const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
 
   useEffect(() => { saveReviewUi(reviewUi); }, [reviewUi]);
   const setZoneId = (zoneId: string) => setReviewUi((ui) => ({ ...ui, zoneId }));
@@ -54,10 +61,10 @@ export function ReviewPage() {
 
   const runCheck = () => setReadiness(checkReadiness());
   const exportSnapshot = () => {
-    const result = createSnapshot();
+    const result = createSnapshot({ includeHistory });
     if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.'); return; }
     downloadTextFile(JSON.stringify(result.value, null, 2), `exhibit-flow-snapshot-${new Date().toISOString().slice(0, 10)}.json`);
-    notify('Snapshot downloaded.');
+    notify(includeHistory ? 'Snapshot with full decision history downloaded.' : 'Snapshot downloaded.');
   };
   const exportChecklist = () => {
     if (!selectedZone || !checklist) return;
@@ -65,16 +72,35 @@ export function ReviewPage() {
     notify('Zone checklist downloaded.');
   };
 
+  const requestTransition = (issue: ReviewIssue, status: IssueStatus) => {
+    if (status === 'resolved' || status === 'open') {
+      setDecision({ issue, action: status === 'resolved' ? 'resolved' : 'reopened' });
+    } else {
+      const result = transitionReviewIssue(issue.id, status);
+      if (!result.ok) notify(result.message ?? 'Transition failed.');
+    }
+  };
+
   return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
-    <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
+    <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready && <label className="check-field export-toggle"><input type="checkbox" checked={includeHistory} onChange={(event) => setIncludeHistory(event.target.checked)} /><span><strong>Include full decision history</strong><small>Every create, edit, reassignment, resolve and reopen event is appended to the export.</small></span></label>}{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot{includeHistory ? ' with history' : ''}</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
     {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
-    <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
+    <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div><span className="review-hint"><History size={14} /> Every decision is recorded immutably and survives refresh.</span></div>
     {checklist && <ZoneChecklistCard checklist={checklist} onDownload={exportChecklist} />}
-    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
+    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => requestTransition(issue, status)} onEdit={() => setEditing(issue)} onToggleHistory={() => setHistoryOpenId((current) => current === issue.id ? null : issue.id)} historyOpen={historyOpenId === issue.id} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
+    {decision && <DecisionDialog issue={decision.issue} action={decision.action} onClose={() => setDecision(null)} onConfirm={(note) => { const result = transitionReviewIssue(decision.issue.id, decision.action === 'resolved' ? 'resolved' : 'open', { note }); setDecision(null); if (!result.ok) notify(result.message ?? 'Transition failed.'); else notify(decision.action === 'resolved' ? 'Resolution recorded in the decision history.' : 'Finding reopened; prior resolution is kept as history.'); return result; }} />}
+    {editing && <IssueEditDialog issue={editing} state={state} onClose={() => setEditing(null)} onSave={(patch, owner) => {
+      let result: CommandResponse = editIssue(editing.id, patch);
+      if (!result.ok) return result;
+      if (owner !== undefined && owner.trim() && owner.trim() !== editing.owner) {
+        result = reassignIssue(editing.id, owner);
+      }
+      if (result.ok) setEditing(null);
+      return result;
+    }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
   </div>;
 }
@@ -93,12 +119,99 @@ function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<R
   </section>;
 }
 
-function IssueRow({ issue, onTransition }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
+function IssueRow({ issue, onTransition, onEdit, onToggleHistory, historyOpen }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => CommandResponse | void; onEdit: () => void; onToggleHistory: () => void; historyOpen: boolean }) {
   const [error, setError] = useState<string | null>(null);
-  const next = issue.status === 'open' ? 'in-progress' : issue.status === 'in-progress' ? 'resolved' : 'in-progress';
+  const next = issue.status === 'open' ? 'in-progress' : issue.status === 'in-progress' ? 'resolved' : 'open';
   const resultLabel = issue.status === 'open' ? 'Start work' : issue.status === 'in-progress' ? 'Resolve' : 'Reopen';
-  const result = () => { const response = onTransition(next); if (!response.ok) { setError(response.message ?? 'Transition failed.'); window.setTimeout(() => setError(null), 2500); } };
-  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
+  const history = summarizeHistory(issue);
+  const result = () => { const response = onTransition(next); if (response && !response.ok) { setError(response.message ?? 'Transition failed.'); window.setTimeout(() => setError(null), 2500); } };
+  return <article className={`issue-row issue-${issue.severity} ${historyOpen ? 'history-open' : ''}`}>
+    <div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div>
+    <div className="issue-main">
+      <div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge>{history.reopenCount > 0 && <Badge tone="warning"><RotateCcw size={11} /> Reopened {history.reopenCount}×</Badge>}{history.resolutionCount > 1 && <Badge tone="neutral">{history.resolutionCount} resolutions on record</Badge>}</div>
+      <p>{issue.description}</p>
+      <div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span>{issue.status === 'resolved' && issue.resolvedAt && <span><CheckCircle2 size={13} /> Resolved {formatDate(issue.resolvedAt)}</span>}</div>
+      {error && <div className="field-error">{error}</div>}
+      {historyOpen && <IssueHistoryPanel issue={issue} />}
+    </div>
+    <div className="issue-actions">
+      <Button variant="ghost" icon={<History size={15} />} aria-label={historyOpen ? 'Hide decision history' : 'Show decision history'} aria-expanded={historyOpen} onClick={onToggleHistory}>{pluralize(history.eventCount, 'event')}</Button>
+      <Button variant="ghost" icon={<Pencil size={14} />} aria-label="Edit finding details and assignee" onClick={onEdit}>Edit</Button>
+      <Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button>
+    </div>
+  </article>;
+}
+
+function IssueHistoryPanel({ issue }: { issue: ReviewIssue }) {
+  const events = sortEvents(issue.events);
+  // A resolution is current only when no reopen/edit lifecycle event follows it.
+  let lastResolutionId: string | undefined;
+  for (const event of events) {
+    if (event.type === 'resolved') lastResolutionId = event.id;
+    if (event.type === 'reopened') lastResolutionId = undefined;
+  }
+  return <div className="issue-history" aria-label="Immutable decision history">
+    <div className="issue-history-head"><History size={13} /><strong>Immutable decision history</strong><span>{pluralize(events.length, 'event')} · append-only</span></div>
+    <ol className="decision-log">
+      {events.map((event) => {
+        const superseded = event.type === 'resolved' && event.id !== lastResolutionId;
+        return <li key={event.id} className={`decision-log-entry decision-${event.type}${superseded ? ' superseded' : ''}`}>
+          <span className="decision-marker">{eventIcon(event.type)}</span>
+          <div className="decision-copy">
+            <div className="decision-line"><strong>{decisionTitle(event)}</strong>{event.backfilled && <Badge tone="neutral">Migrated initial record</Badge>}{superseded && <Badge tone="warning">No longer the current conclusion</Badge>}</div>
+            <p>{decisionDetail(event)}</p>
+            <small>{event.actor} · {formatDate(event.at)}{event.note && !event.backfilled ? ` · “${event.note}”` : ''}</small>
+          </div>
+        </li>;
+      })}
+    </ol>
+  </div>;
+}
+
+function eventIcon(type: IssueEvent['type']) {
+  switch (type) {
+    case 'created': return <Plus size={12} />;
+    case 'started': return <Clock size={12} />;
+    case 'resolved': return <CheckCircle2 size={12} />;
+    case 'reopened': return <RotateCcw size={12} />;
+    case 'reassigned': return <UserRound size={12} />;
+    case 'edited': return <Pencil size={12} />;
+  }
+}
+
+function decisionTitle(event: IssueEvent): string {
+  switch (event.type) {
+    case 'created': return 'Finding created';
+    case 'edited': return 'Finding details edited';
+    case 'reassigned': return `Reassigned to ${event.owner ?? 'unassigned'}`;
+    case 'started': return 'Work started';
+    case 'resolved': return 'Marked resolved';
+    case 'reopened': return 'Reopened for more work';
+  }
+}
+
+function decisionDetail(event: IssueEvent): string {
+  if (event.backfilled && event.type === 'created') {
+    const status = event.note === 'resolved' ? 'resolved' : event.note === 'in-progress' ? 'in progress' : 'open';
+    return `Initial record generated from a workspace predating decision history; finding was ${status} at migration.`;
+  }
+  if (event.type === 'reassigned') return event.owner ? `Ownership moved to ${event.owner}.` : 'Ownership cleared.';
+  if (event.type === 'edited' && event.snapshot) {
+    const labels: Array<[string, string]> = [];
+    if ('title' in event.snapshot) labels.push(['title', event.snapshot.title ?? '']);
+    if ('description' in event.snapshot) labels.push(['description', 'updated text']);
+    if ('severity' in event.snapshot) labels.push(['severity', titleCase(event.snapshot.severity ?? '')]);
+    if ('zoneId' in event.snapshot) labels.push(['zone link', event.snapshot.zoneId ? 'changed' : 'removed']);
+    if ('artifactId' in event.snapshot) labels.push(['object link', event.snapshot.artifactId ? 'changed' : 'removed']);
+    return `Changed ${labels.map(([field, value]) => value === 'updated text' || value === 'changed' || value === 'removed' ? `${field} ${value}` : `${field} to “${value}”`).join('; ')}.`;
+  }
+  if (event.type === 'created' && event.snapshot) {
+    return `Logged as ${event.snapshot.severity ?? 'warning'} and owned by ${event.actor}.`;
+  }
+  if (event.type === 'reopened') return 'The earlier resolution no longer stands as the current conclusion; it remains visible in the chain.';
+  if (event.type === 'resolved') return 'Resolution recorded as the current conclusion.';
+  if (event.type === 'started') return 'Owner began working on the finding.';
+  return '';
 }
 
 function IssueEditor({ state, onClose, onSave }: { state: ReturnType<typeof useWorkspace>['state']; onClose: () => void; onSave: (draft: IssueDraft) => { ok: boolean; errors?: Record<string, string> } }) {
@@ -106,4 +219,25 @@ function IssueEditor({ state, onClose, onSave }: { state: ReturnType<typeof useW
   const [errors, setErrors] = useState<Record<string, string>>({});
   const update = <K extends keyof IssueDraft>(key: K, value: IssueDraft[K]) => setDraft((current) => ({ ...current, [key]: value }));
   return <Modal eyebrow="NEW REVIEW FINDING" title="Capture an open question" onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" icon={<Send size={15} />} onClick={() => { const result = onSave(draft); if (!result.ok) setErrors(result.errors ?? {}); }}>Create finding</Button></>}><div className="form-grid"><TextField label="Finding title" value={draft.title} onChange={(event) => update('title', event.target.value)} error={errors.title} placeholder="What needs a decision?" /><SelectField label="Severity" value={draft.severity} onChange={(event) => update('severity', event.target.value as IssueSeverity)}><option value="note">Note</option><option value="warning">Warning</option><option value="critical">Critical blocker</option></SelectField><TextField label="Owner" value={draft.owner} onChange={(event) => update('owner', event.target.value)} error={errors.owner} placeholder="Team member" /><SelectField label="Linked zone" value={draft.zoneId} onChange={(event) => update('zoneId', event.target.value)}><option value="">No zone link</option>{state.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField><SelectField label="Linked object" value={draft.artifactId} onChange={(event) => update('artifactId', event.target.value)}><option value="">No object link</option>{state.artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.title}</option>)}</SelectField><TextField label="Context and next step" textarea rows={5} value={draft.description} onChange={(event) => update('description', event.target.value)} error={errors.description} placeholder="Describe the decision, evidence, or next action." /></div></Modal>;
+}
+
+function IssueEditDialog({ issue, state, onClose, onSave }: { issue: ReviewIssue; state: ReturnType<typeof useWorkspace>['state']; onClose: () => void; onSave: (patch: { title?: string; description?: string; severity?: IssueSeverity; zoneId?: string; artifactId?: string }, owner?: string) => { ok: boolean; errors?: Record<string, string>; message?: string } }) {
+  const [draft, setDraft] = useState({ title: issue.title, description: issue.description, severity: issue.severity, zoneId: issue.zoneId ?? '', artifactId: issue.artifactId ?? '', owner: issue.owner });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const update = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  const submit = () => {
+    const result = onSave({ title: draft.title, description: draft.description, severity: draft.severity, zoneId: draft.zoneId, artifactId: draft.artifactId }, draft.owner);
+    if (!result.ok) setErrors(result.errors ?? (result.message ? { title: result.message } : {}));
+  };
+  return <Modal eyebrow="EDIT FINDING" title="Update details or assignment" onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" icon={<Check size={15} />} onClick={submit}>Record changes</Button></>}><div className="form-grid"><TextField label="Finding title" value={draft.title} onChange={(event) => update('title', event.target.value)} error={errors.title} /><SelectField label="Severity" value={draft.severity} onChange={(event) => update('severity', event.target.value as IssueSeverity)}><option value="note">Note</option><option value="warning">Warning</option><option value="critical">Critical blocker</option></SelectField><TextField label="Owner (records a reassignment when changed)" value={draft.owner} onChange={(event) => update('owner', event.target.value)} error={errors.owner} /><SelectField label="Linked zone" value={draft.zoneId} onChange={(event) => update('zoneId', event.target.value)}><option value="">No zone link</option>{state.zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField><SelectField label="Linked object" value={draft.artifactId} onChange={(event) => update('artifactId', event.target.value)}><option value="">No object link</option>{state.artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifact.title}</option>)}</SelectField><TextField label="Context and next step" textarea rows={5} value={draft.description} onChange={(event) => update('description', event.target.value)} error={errors.description} /><p className="field-hint-block">Every change is appended as a new decision event; earlier values remain in the history and cannot be overwritten.</p></div></Modal>;
+}
+
+function DecisionDialog({ issue, action, onClose, onConfirm }: { issue: ReviewIssue; action: 'resolved' | 'reopened'; onClose: () => void; onConfirm: (note: string) => CommandResponse }) {
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  return <Modal eyebrow={action === 'resolved' ? 'RECORD RESOLUTION' : 'REOPEN FINDING'} title={action === 'resolved' ? `Resolve “${issue.title}”` : `Reopen “${issue.title}”`} onClose={onClose} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" icon={action === 'resolved' ? <Check size={15} /> : <RotateCcw size={15} />} onClick={() => { const result = onConfirm(note); if (!result.ok) setError(result.message ?? 'Transition failed.'); }}>{action === 'resolved' ? 'Record resolution' : 'Reopen finding'}</Button></>}>
+    <div className="form-grid">
+      <TextField label={action === 'resolved' ? 'Resolution evidence or decision' : 'Why is this being reopened?'} textarea rows={5} value={note} onChange={(event) => setNote(event.target.value)} error={error ?? undefined} placeholder={action === 'resolved' ? 'What evidence or decision closes this finding?' : 'What changed or was missed? The prior resolution stays in the history.'} hint={action === 'resolved' ? undefined : 'Optional, but it explains why the earlier resolution no longer stands.'} />
+    </div>
+  </Modal>;
 }
