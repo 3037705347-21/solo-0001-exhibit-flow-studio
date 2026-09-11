@@ -3,6 +3,7 @@ import {
   clearWorkspace,
   commitInitialMigration,
   commitWorkspace,
+  dismissRecovery,
   loadWorkspace,
   RECOVERY_KEY,
   STORAGE_KEY,
@@ -124,5 +125,25 @@ describe('workspace persistence', () => {
     expect(outcome.kind).toBe('unavailable');
     expect(storage.getItem(STORAGE_KEY)).toBe('{not json');
     expect(storage.getItem(RECOVERY_KEY)).not.toBeNull();
+  });
+
+  it('keeps the recovery copy after acknowledgement and clears only the broken main document', () => {
+    const { storage } = memoryStorage({ [STORAGE_KEY]: '{not json' });
+    const loaded = loadWorkspace(storage);
+    expect(loaded.recovered).toBe(true);
+    const stashed = storage.getItem(RECOVERY_KEY);
+    expect(stashed).not.toBeNull();
+
+    dismissRecovery(storage);
+
+    // The preserved copy remains available after the user acknowledges the warning.
+    expect(storage.getItem(RECOVERY_KEY)).toBe(stashed);
+    // Only the unreadable main document is cleared so normal saving can resume.
+    expect(storage.getItem(STORAGE_KEY)).toBeNull();
+
+    // Subsequent normal writes land as a revisioned envelope.
+    const committed = commitWorkspace(loaded.workspace, 1, storage);
+    expect(committed.kind).toBe('committed');
+    expect(storage.getItem(RECOVERY_KEY)).toBe(stashed);
   });
 });

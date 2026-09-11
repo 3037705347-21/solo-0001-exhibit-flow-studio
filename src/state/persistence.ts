@@ -291,18 +291,18 @@ export function overwriteWorkspace(
 }
 
 /**
- * Finish recovery: keep the stashed copy for inspection but clear the corrupt
- * main document so the session (showing the sample plan) can save again. The
- * main key is only removed when it still fails to parse.
+ * Finish recovery by clearing the unreadable main document so the sample-plan
+ * session can save again. The preserved copy under RECOVERY_KEY is intentionally
+ * kept (never removed here) so the user can still inspect or recover it after
+ * acknowledging the warning.
  */
 export function dismissRecovery(storage: StorageLike = localStorage as StorageLike): void {
   try {
-    storage.removeItem(RECOVERY_KEY);
     if (parseStored(storage.getItem(STORAGE_KEY)).kind === 'invalid') {
       storage.removeItem(STORAGE_KEY);
     }
   } catch {
-    // Recovery stashes are non-critical.
+    // Recovery cleanup is best effort; the preserved copy is always retained.
   }
 }
 

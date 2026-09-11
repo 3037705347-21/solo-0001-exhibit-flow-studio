@@ -134,6 +134,101 @@ test.describe('cross-tab workspace version coordination', () => {
     }
   });
 
+  test('the conflict comparison shows original, local and remote values side by side', async ({ context }) => {
+    const tabA = await context.newPage();
+    const tabB = await context.newPage();
+    await tabA.goto('/collection');
+    await tabB.goto('/collection');
+
+    // Both tabs start editing the Lantern before either saves, pinning the same base revision.
+    await tabA.getByRole('button', { name: 'Edit' }).first().click();
+    await tabA.getByLabel('Maker / source').fill('Local workshop value');
+
+    await tabB.getByRole('button', { name: 'Edit' }).first().click();
+    await tabB.getByLabel('Maker / source').fill('Remote workshop value');
+    await tabB.getByLabel('Dwell time (min)').fill('9');
+    await tabB.getByRole('button', { name: 'Save changes' }).click();
+    await expect(tabB.getByText('Object details updated.')).toBeVisible();
+
+    await tabA.getByRole('button', { name: 'Save changes' }).click();
+    const dialog = tabA.getByRole('dialog', { name: 'Another tab moved the workspace forward' });
+    await expect(dialog).toBeVisible();
+
+    // The dedicated overlap table shows the original value and each tab's competing new value.
+    await expect(dialog.getByRole('columnheader', { name: 'Original value' })).toBeVisible();
+    await expect(dialog.getByRole('columnheader', { name: 'Your tab' })).toBeVisible();
+    await expect(dialog.getByRole('columnheader', { name: 'Other tab (saved)' })).toBeVisible();
+
+    const makerRow = dialog.locator('tr', { has: tabA.getByRole('rowheader', { name: 'Maker' }) });
+    await expect(makerRow.getByText('H. B. Cooke & Co.')).toBeVisible();
+    await expect(makerRow.getByText('Local workshop value')).toBeVisible();
+    await expect(makerRow.getByText('Remote workshop value')).toBeVisible();
+
+    // A field changed only by the other tab still displays base vs new (your side unchanged).
+    const dwellRow = dialog.locator('tr', { has: tabA.getByRole('rowheader', { name: 'Dwell time' }) });
+    await expect(dwellRow.locator('.conflict-cell-base')).toHaveText('4 min');
+    await expect(dwellRow.locator('.conflict-cell-local')).toHaveText('4 min');
+    await expect(dwellRow.locator('.conflict-cell-remote')).toHaveText('9 min');
+
+    // The side columns are visually distinct and the redo stays gated until comparison is acknowledged.
+    const redo = dialog.getByRole('button', { name: 'Redo my change' });
+    await expect(redo).toBeDisabled();
+    await dialog.getByRole('checkbox', { name: /I have compared the changes/ }).check();
+    await expect(redo).toBeEnabled();
+  });
+
+  test('an unreadable saved document is preserved in both tabs after acknowledgement', async ({ context }) => {
+    const tabA = await context.newPage();
+    const tabB = await context.newPage();
+    await tabA.goto('/collection');
+    await tabB.goto('/collection');
+
+    // Corrupt the saved document in every open tab and reload them: both must detect it.
+    const broken = '{ this is not a valid workspace document';
+    await tabA.evaluate((raw) => localStorage.setItem('exhibit-flow.workspace.v1', raw), broken);
+    await tabB.evaluate((raw) => localStorage.setItem('exhibit-flow.workspace.v1', raw), broken);
+    await tabA.reload();
+    await tabB.reload();
+
+    const bannerA = tabA.getByRole('status').filter({ hasText: 'Saved workspace could not be read' });
+    const bannerB = tabB.getByRole('status').filter({ hasText: 'Saved workspace could not be read' });
+    await expect(bannerA).toBeVisible();
+    await expect(bannerB).toBeVisible();
+
+    const recoveryKey = 'exhibit-flow.workspace-recovered.v1';
+    const stashedA = await tabA.evaluate((key) => localStorage.getItem(key), recoveryKey);
+    expect(stashedA).not.toBeNull();
+    expect(stashedA).toContain(broken);
+
+    // Acknowledging in one tab clears the broken main document but keeps the recovery copy.
+    await bannerA.getByRole('button', { name: /Acknowledge/ }).click();
+    await expect(bannerA).toBeHidden();
+    const afterA = await tabA.evaluate(() => ({
+      main: localStorage.getItem('exhibit-flow.workspace.v1'),
+      recovery: localStorage.getItem('exhibit-flow.workspace-recovered.v1'),
+    }));
+    expect(afterA.main).toBeNull();
+    expect(afterA.recovery).toBe(stashedA);
+
+    // The other tab still shows its warning and its acknowledgement also keeps the copy.
+    await expect(bannerB).toBeVisible();
+    await bannerB.getByRole('button', { name: /Acknowledge/ }).click();
+    const afterB = await tabB.evaluate(() => localStorage.getItem('exhibit-flow.workspace-recovered.v1'));
+    expect(afterB).toBe(stashedA);
+
+    // Work continues on a clean, revisioned document without touching the preserved copy.
+    await tabA.getByRole('button', { name: 'Edit' }).first().click();
+    await tabA.getByLabel('Maker / source').fill('After recovery edit');
+    await tabA.getByRole('button', { name: 'Save changes' }).click();
+    await expect(tabA.getByText('Object details updated.')).toBeVisible();
+    const finalState = await tabA.evaluate(() => ({
+      revision: JSON.parse(localStorage.getItem('exhibit-flow.workspace.v1')!).revision,
+      recovery: localStorage.getItem('exhibit-flow.workspace-recovered.v1'),
+    }));
+    expect(finalState.revision).toBeGreaterThanOrEqual(2);
+    expect(finalState.recovery).toBe(stashedA);
+  });
+
   test('single-tab editing still autosaves without any conflict UI', async ({ page }) => {
     await page.goto('/journey');
     await page.getByRole('button', { name: /Conservator’s Gloves/ }).click();

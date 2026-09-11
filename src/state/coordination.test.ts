@@ -2,35 +2,51 @@ import { describe, expect, it } from 'vitest';
 import { replayIntents, reviewChanges } from './coordination';
 import { createSeedWorkspace } from './seed';
 import { workspaceReducer } from './reducer';
+import type { Artifact } from '../domain/models';
 
 function seed() {
   return createSeedWorkspace();
 }
 
 describe('reviewChanges', () => {
-  it('summarizes an object edit and an unrelated finding change as non-overlapping', () => {
+  it('summarizes an object edit and an unrelated finding change as non-overlapping with old and new values', () => {
     const base = seed();
     const local = workspaceReducer(base, {
       type: 'artifact/upsert',
-      artifact: { ...base.artifacts[0], title: 'Local Lantern Title', summary: base.artifacts[0].summary },
+      artifact: { ...base.artifacts[0], title: 'Local Lantern Title' },
     });
     const remote = workspaceReducer(base, { type: 'issue/transition', issueId: base.issues[0].id, status: 'resolved' });
     const review = reviewChanges(base, local, remote);
     expect(review.local).toHaveLength(1);
     expect(review.local[0].entity).toBe('object');
-    expect(review.local[0].fields).toContain('Title');
+    expect(review.local[0].fields).toContainEqual(expect.objectContaining({
+      label: 'Title',
+      before: 'Railway Signal Lantern',
+      after: 'Local Lantern Title',
+    }));
     expect(review.remote).toHaveLength(1);
     expect(review.remote[0].entity).toBe('finding');
+    expect(review.remote[0].fields).toContainEqual(expect.objectContaining({ label: 'Status' }));
     expect(review.overlap).toBe(false);
+    expect(review.overlapping).toHaveLength(0);
   });
 
-  it('flags overlap when both tabs edit the same object', () => {
+  it('lines up original, local and remote values when both tabs edit the same object', () => {
     const base = seed();
     const local = workspaceReducer(base, { type: 'artifact/upsert', artifact: { ...base.artifacts[0], title: 'Local rename' } });
-    const remote = workspaceReducer(base, { type: 'artifact/upsert', artifact: { ...base.artifacts[0], maker: 'Remote maker update' } });
+    const remote = workspaceReducer(base, { type: 'artifact/upsert', artifact: { ...base.artifacts[0], title: 'Remote rename' } });
     const review = reviewChanges(base, local, remote);
     expect(review.overlap).toBe(true);
-    expect(review.local[0].key).toBe(review.remote[0].key);
+    expect(review.overlapping).toHaveLength(1);
+    const record = review.overlapping[0];
+    expect(record.key).toBe(`object:${base.artifacts[0].id}`);
+    const titleRow = record.rows.find((row) => row.label === 'Title');
+    expect(titleRow).toEqual({
+      label: 'Title',
+      base: 'Railway Signal Lantern',
+      local: 'Local rename',
+      remote: 'Remote rename',
+    });
   });
 
   it('describes placement moves made in each tab and only overlaps for the same object', () => {
@@ -41,11 +57,14 @@ describe('reviewChanges', () => {
     const review = reviewChanges(base, local, remote);
     expect(review.local[0].entity).toBe('placement');
     expect(review.local[0].kind).toBe('moved');
+    expect(review.local[0].fields.some((field) => field.label === 'Zone')).toBe(true);
     expect(review.remote[0].entity).toBe('placement');
     expect(review.overlap).toBe(false);
 
     const sameObject = workspaceReducer(base, { type: 'placement/assign', artifactId: first, zoneId: 'zone-after' });
-    expect(reviewChanges(base, local, sameObject).overlap).toBe(true);
+    const conflicting = reviewChanges(base, local, sameObject);
+    expect(conflicting.overlap).toBe(true);
+    expect(conflicting.overlapping[0].rows.some((row) => row.local !== row.remote)).toBe(true);
   });
 
   it('treats removing an object on one side and placing it on the other as overlapping', () => {
@@ -67,6 +86,14 @@ describe('reviewChanges', () => {
     const review = reviewChanges(base, local, remote);
     expect(review.local[0]).toMatchObject({ entity: 'finding', kind: 'added', title: 'Local question' });
     expect(review.remote.some((change) => change.entity === 'placement' && change.kind === 'removed')).toBe(true);
+  });
+
+  it('shows old and new preference values', () => {
+    const base = seed();
+    const local = workspaceReducer(base, { type: 'preferences/update', preferences: { ...base.preferences, groupSize: 12 } });
+    const remote = base;
+    const review = reviewChanges(base, local, remote);
+    expect(review.local[0].fields).toContainEqual({ label: 'Group size', before: '6 people', after: '12 people' });
   });
 });
 
@@ -103,19 +130,19 @@ describe('replayIntents', () => {
     expect(patterns.artifactIds).toContain('artifact-lantern');
   });
 
-  it('reports an illegal issue transition as a replay error but keeps the rest', () => {
+  it('reports a duplicated accession created by the two tabs adding separate objects as a replay error', () => {
     const base = seed();
-    const issue = base.issues.find((candidate) => candidate.status === 'resolved')!;
-    const local = workspaceReducer(base, { type: 'issue/transition', issueId: issue.id, status: 'in-progress' });
-    const remote = base;
-    // Stale intent tries to transition the already-resolved issue directly to open via a dispatch shape.
+    const template = base.artifacts[0];
+    const now = new Date().toISOString();
+    const localObject: Artifact = { ...template, id: 'artifact-local-new', title: 'Local new object', accessionId: 'AF-DUP-001', createdAt: now, updatedAt: now };
+    const remoteObject: Artifact = { ...template, id: 'artifact-remote-new', title: 'Remote new object', accessionId: 'AF-DUP-001', createdAt: now, updatedAt: now };
+    const local = workspaceReducer(base, { type: 'artifact/upsert', artifact: localObject });
+    const remote = workspaceReducer(base, { type: 'artifact/upsert', artifact: remoteObject });
     const result = replayIntents(
-      [{ type: 'issue/transition', issueId: issue.id, status: 'in-progress' }],
+      [{ type: 'artifact/upsert', artifact: localObject }],
       local,
       remote,
     );
-    // On the remote baseline the issue is resolved -> in-progress is legal, so this succeeds.
-    expect(result.errors).toHaveLength(0);
-    expect(result.state.issues.find((candidate) => candidate.id === issue.id)?.status).toBe('in-progress');
+    expect(result.errors.some((error) => error.includes('used by more than one object'))).toBe(true);
   });
 });

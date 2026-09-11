@@ -10,7 +10,7 @@ import { workspaceReducer } from './reducer';
 import type { WorkspaceAction } from './actions';
 import { commitInitialMigration, commitWorkspace, dismissRecovery, loadWorkspace, overwriteWorkspace, STORAGE_KEY, type LoadedSession } from './persistence';
 import { createSeedWorkspace } from './seed';
-import { replayIntents, reviewChanges, type ChangeReview } from './coordination';
+import { replayIntents, reviewChanges, overlapSummary, type ChangeReview, type OverlapRecord } from './coordination';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { Badge } from '../components/Badge';
@@ -463,6 +463,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [flush]);
 
   const dismissRecoveredNotice = useCallback(() => {
+    // Clears only the unreadable main document; the stashed recovery copy remains.
     dismissRecovery();
     setRecoveredDocument(false);
     // The corrupt main document is now stashed and cleared; the sample-plan
@@ -522,17 +523,61 @@ const ENTITY_LABEL: Record<string, string> = {
   preferences: 'Preferences',
 };
 
-function ChangeList({ items, tone }: { items: NonNullable<ConflictState['review']>['local']; tone: 'local' | 'remote' }) {
-  if (items.length === 0) return <p className="conflict-empty">No record-level changes detected.</p>;
+function FieldPairs({ fields, tone }: { fields: NonNullable<ConflictState['review']>['local'][number]['fields']; tone: 'local' | 'remote' }) {
+  if (fields.length === 0) return null;
+  return <dl className={`conflict-pairs conflict-pairs-${tone}`}>
+    {fields.map((field) => (
+      <div key={field.label} className="conflict-pair">
+        <dt>{field.label}</dt>
+        <dd className="conflict-pair-before">{field.before}</dd>
+        <dd className="conflict-pair-arrow">→</dd>
+        <dd className="conflict-pair-after">{field.after}</dd>
+      </div>
+    ))}
+  </dl>;
+}
+
+function ChangeList({ items, tone, excludeKeys }: { items: ChangeReview['local']; tone: 'local' | 'remote'; excludeKeys?: Set<string> }) {
+  const visible = excludeKeys ? items.filter((item) => !excludeKeys.has(item.key)) : items;
+  if (visible.length === 0) return <p className="conflict-empty">No record-level changes detected.</p>;
   return <ul className="conflict-change-list">
-    {items.map((item, index) => (
+    {visible.map((item, index) => (
       <li key={`${item.key}-${index}`} className={`conflict-change conflict-change-${tone}`}>
         <div className="conflict-change-head"><Badge tone={tone === 'local' ? 'info' : 'warning'}>{ENTITY_LABEL[item.entity]}</Badge><strong>{item.title}</strong></div>
         <small>{titleCase(item.kind)}{item.detail ? ` · ${item.detail}` : ''}</small>
-        {item.fields.length > 0 && <div className="conflict-fields">{item.fields.map((field) => <span key={field} className="conflict-field">{field}</span>)}</div>}
+        <FieldPairs fields={item.fields} tone={tone} />
       </li>
     ))}
   </ul>;
+}
+
+function OverlapTable({ records }: { records: OverlapRecord[] }) {
+  return <section className="conflict-overlap-section">
+    <div className="eyebrow">RECORDS BOTH TABS CHANGED — COMPARE VALUES</div>
+    {records.map((record) => {
+      const summary = overlapSummary(record);
+      return <article key={record.key} className="conflict-overlap-card">
+        <div className="conflict-overlap-head">
+          <Badge tone="danger">{ENTITY_LABEL[record.entity]}</Badge>
+          <strong>{record.title}</strong>
+          <span className="conflict-overlap-kinds">Your tab: {titleCase(record.localKind)} · Other tab: {titleCase(record.remoteKind)}</span>
+        </div>
+        {summary
+          ? <p className="conflict-overlap-note">{summary}</p>
+          : <table className="conflict-table">
+            <thead><tr><th scope="col">Field</th><th scope="col">Original value</th><th scope="col">Your tab</th><th scope="col">Other tab (saved)</th></tr></thead>
+            <tbody>
+              {record.rows.map((row) => <tr key={row.label} className={row.local !== row.remote ? 'conflict-row-diverges' : ''}>
+                <th scope="row">{row.label}</th>
+                <td className="conflict-cell-base">{row.base}</td>
+                <td className="conflict-cell-local">{row.local}</td>
+                <td className="conflict-cell-remote">{row.remote}</td>
+              </tr>)}
+            </tbody>
+          </table>}
+      </article>;
+    })}
+  </section>;
 }
 
 function ConflictLayer(props: {
@@ -554,8 +599,8 @@ function ConflictLayer(props: {
   return <>
     {recovered && !conflict && <div className="conflict-banner conflict-banner-warning" role="status">
       <FileWarning size={17} />
-      <div><strong>Saved workspace could not be read.</strong><span>The unreadable copy is preserved under a recovery key. The sample plan is open; acknowledge to keep working. Nothing was deleted.</span></div>
-      <Button variant="secondary" onClick={props.onDismissRecovered}>Acknowledge</Button>
+      <div><strong>Saved workspace could not be read.</strong><span>The unreadable copy is kept permanently under the recovery key <code>exhibit-flow.workspace-recovered.v1</code> — acknowledging only clears the broken main document so you can keep working. Nothing is deleted.</span></div>
+      <Button variant="secondary" onClick={props.onDismissRecovered}>Acknowledge &amp; keep copy</Button>
     </div>}
 
     {notice?.kind === 'unavailable' && !conflict && <div className="conflict-banner conflict-banner-danger" role="alert">
@@ -571,6 +616,7 @@ function ConflictLayer(props: {
     </div>}
 
     {conflict && <Modal
+      className="modal-conflict"
       eyebrow="WORKSPACE VERSION CONFLICT"
       title="Another tab moved the workspace forward"
       onClose={props.onKeep}
@@ -589,17 +635,18 @@ function ConflictLayer(props: {
       <div className="conflict-intro">
         <p>This tab’s change is based on revision <code>{conflict.baseRevision}</code>; another tab already saved revision <code>{conflict.remoteRevision}</code>. Nothing has been overwritten.</p>
         {conflict.review.overlap
-          ? <div className="conflict-overlap"><AlertTriangle size={15} /><span><strong>Overlapping records detected.</strong> Compare the two sides carefully; redoing your change may supersede the saved edit on the same record.</span></div>
+          ? <div className="conflict-overlap"><AlertTriangle size={15} /><span><strong>Overlapping records detected.</strong> Compare the original value with each tab’s new value below; redoing your change may supersede the saved edit on the same record.</span></div>
           : <div className="conflict-clean"><Badge tone="positive">No overlapping records</Badge><span>Your change touches different records, so it can be redone automatically.</span></div>}
       </div>
+      {conflict.review.overlapping.length > 0 && <OverlapTable records={conflict.review.overlapping} />}
       <div className="conflict-columns">
         <section className="conflict-column">
           <div className="eyebrow">YOUR UNSAVED CHANGE</div>
-          <ChangeList items={conflict.review.local} tone="local" />
+          <ChangeList items={conflict.review.local} tone="local" excludeKeys={new Set(conflict.review.overlapping.map((record) => record.key))} />
         </section>
         <section className="conflict-column">
           <div className="eyebrow">SAVED IN THE OTHER TAB</div>
-          <ChangeList items={conflict.review.remote} tone="remote" />
+          <ChangeList items={conflict.review.remote} tone="remote" excludeKeys={new Set(conflict.review.overlapping.map((record) => record.key))} />
         </section>
       </div>
       {conflict.replayErrors && conflict.replayErrors.length > 0 && <div className="conflict-replay-errors">
