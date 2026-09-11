@@ -4,7 +4,7 @@ import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildReleasePackage, nextReleaseNumber } from '../domain/release';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ReleasePackage, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ReleasePackage, ReviewIssue, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -91,21 +91,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (draft.description.trim().length < 16) return { ok: false, errors: { description: 'Add at least 16 characters of context.' } };
     if (!draft.owner.trim()) return { ok: false, errors: { owner: 'Assign an owner.' } };
     const now = new Date().toISOString();
-    dispatch({
-      type: 'issue/add',
-      issue: {
-        id: createId('issue'),
-        title: draft.title.trim(),
-        description: draft.description.trim(),
-        severity: draft.severity,
-        status: 'open',
-        owner: draft.owner.trim(),
-        zoneId: draft.zoneId || undefined,
-        artifactId: draft.artifactId || undefined,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
+    const issue: ReviewIssue = {
+      id: createId('issue'),
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      severity: draft.severity,
+      status: 'open',
+      owner: draft.owner.trim(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (draft.zoneId) issue.zoneId = draft.zoneId;
+    if (draft.artifactId) issue.artifactId = draft.artifactId;
+    dispatch({ type: 'issue/add', issue });
     return { ok: true };
   }, []);
 

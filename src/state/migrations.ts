@@ -1,3 +1,4 @@
+import { normalizeIssueShape } from '../domain/transitions';
 import { isReleasePackage } from '../domain/release';
 import type { ReleasePackage, WorkspaceState } from '../domain/models';
 
@@ -71,16 +72,11 @@ export function validateReferences(state: WorkspaceState): WorkspaceState {
     ...state,
     zones: state.zones.map((zone) => ({ ...zone, artifactIds: zone.artifactIds.filter((id) => artifactIds.has(id)) })),
     issues: state.issues.map((issue) => {
-      // JSON persistence turns missing optional links into explicit null; drop those
-      // keys so records match the domain shape and release fingerprints stay stable.
-      const normalized: typeof issue = { ...issue };
-      const zoneId = issue.zoneId && zoneIds.has(issue.zoneId) ? issue.zoneId : undefined;
-      const artifactId = issue.artifactId && artifactIds.has(issue.artifactId) ? issue.artifactId : undefined;
-      if (zoneId) normalized.zoneId = zoneId;
-      else delete normalized.zoneId;
-      if (artifactId) normalized.artifactId = artifactId;
-      else delete normalized.artifactId;
-      if (!normalized.resolvedAt) delete normalized.resolvedAt;
+      // JSON persistence turns missing optional links into explicit null; restore the
+      // canonical shape (links omitted entirely when empty) and drop dangling links.
+      const normalized = normalizeIssueShape(issue);
+      if (normalized.zoneId && !zoneIds.has(normalized.zoneId)) delete normalized.zoneId;
+      if (normalized.artifactId && !artifactIds.has(normalized.artifactId)) delete normalized.artifactId;
       return normalized;
     }),
   };

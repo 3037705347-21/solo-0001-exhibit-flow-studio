@@ -1,4 +1,4 @@
-import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { normalizeIssueShape, regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -34,14 +34,6 @@ function assignArtifact(state: WorkspaceState, artifactId: string, zoneId: strin
       return { ...zone, artifactIds };
     }),
   };
-}
-
-function normalizeIssue(issue: WorkspaceState['issues'][number]): WorkspaceState['issues'][number] {
-  const normalized: WorkspaceState['issues'][number] = { ...issue };
-  if (!normalized.zoneId) delete normalized.zoneId;
-  if (!normalized.artifactId) delete normalized.artifactId;
-  if (!normalized.resolvedAt) delete normalized.resolvedAt;
-  return normalized;
 }
 
 function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: string, direction: -1 | 1): WorkspaceState {
@@ -84,12 +76,12 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
     case 'issue/add':
-      return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
+      return stamp(regressReadyProject({ ...state, issues: [normalizeIssueShape(action.issue), ...state.issues] }));
     case 'issue/transition':
       return stamp(regressReadyProject({
         ...state,
         issues: state.issues.map((issue) =>
-          issue.id === action.issueId ? normalizeIssue(transitionIssue(issue, action.status, action.at)) : issue,
+          issue.id === action.issueId ? normalizeIssueShape(transitionIssue(issue, action.status, action.at)) : issue,
         ),
       }));
     case 'preferences/update':

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeJourney } from '../domain/journeyAnalysis';
-import { buildReleasePackage } from '../domain/release';
+import { assessReleaseDrift, buildReleasePackage } from '../domain/release';
 import { evaluateReadiness } from '../domain/reviewRules';
 import type { WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
@@ -42,6 +42,37 @@ describe('release reducer', () => {
     });
     expect(edited.releases).toHaveLength(1);
     expect(edited.releases[0].label).toBe('REL-0001');
+  });
+
+  it('stores a new finding without links in the canonical shape so it does not drift on publish', () => {
+    const state = readyWorkspace();
+    const added = workspaceReducer(state, {
+      type: 'issue/add',
+      // Even if a producer supplies explicit undefined or null links, the stored record omits them.
+      issue: {
+        id: 'issue-unlinked',
+        title: 'Welcome note timing',
+        description: 'Confirm when the welcome note plays during the opening remarks.',
+        severity: 'note',
+        status: 'open',
+        owner: 'Nadia Park',
+        zoneId: undefined,
+        artifactId: undefined,
+        createdAt: '2026-09-05T11:00:00.000Z',
+        updatedAt: '2026-09-05T11:00:00.000Z',
+        resolvedAt: undefined,
+      } as WorkspaceState['issues'][number],
+    });
+    const stored = added.issues.find((issue) => issue.id === 'issue-unlinked')!;
+    expect(Object.prototype.hasOwnProperty.call(stored, 'zoneId')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(stored, 'artifactId')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(stored, 'resolvedAt')).toBe(false);
+
+    // Publish after adding the finding, then change nothing: the package must match.
+    const release = buildReleasePackage(added, evaluateReadiness(added, analyzeJourney(added.artifacts, added.zones)));
+    const published = workspaceReducer(added, { type: 'release/publish', release });
+    const drift = assessReleaseDrift(published.releases[0], published);
+    expect(drift.drifted).toBe(false);
   });
 });
 

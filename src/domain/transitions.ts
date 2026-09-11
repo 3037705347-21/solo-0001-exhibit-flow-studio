@@ -46,3 +46,18 @@ export function regressReadyProject(state: WorkspaceState): WorkspaceState {
   if (state.project.stage !== 'ready') return state;
   return { ...state, project: { ...state.project, stage: 'review' } };
 }
+
+/**
+ * Findings have one canonical record shape: optional links and the resolution
+ * timestamp are omitted entirely when empty. Keeping explicit `undefined` keys
+ * out matters because a JSON freeze drops them, so otherwise a freshly created
+ * finding without links would fingerprint differently live vs. frozen and be
+ * reported as drift the moment it is published.
+ */
+export function normalizeIssueShape(issue: ReviewIssue): ReviewIssue {
+  const normalized: ReviewIssue = { ...issue };
+  if (!normalized.zoneId) delete normalized.zoneId;
+  if (!normalized.artifactId) delete normalized.artifactId;
+  if (!normalized.resolvedAt) delete normalized.resolvedAt;
+  return normalized;
+}

@@ -127,3 +127,40 @@ test('opens a legacy snapshot export and reads it read-only', async ({ page }) =
   await expect(viewer.getByText('READINESS SUMMARY AT FREEZE')).toHaveCount(0);
   await expect(viewer.getByText('Matches the current workspace')).toBeVisible();
 });
+
+test('a new finding without object or zone links does not drift its own release', async ({ page }) => {
+  await page.goto('/review');
+
+  // Clear the readiness gate.
+  await page.locator('article').filter({ hasText: 'Add transcript beside oral history station' })
+    .getByRole('button', { name: 'Resolve', exact: true }).click();
+
+  // Create a finding linked to neither an object nor a zone.
+  await page.getByRole('button', { name: 'New finding' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Finding title').fill('Welcome note cue for opening night');
+  await dialog.getByLabel('Owner').fill('Nadia Park');
+  await dialog.getByLabel('Context and next step')
+    .fill('Floor staff need a one-line reminder for when to play the welcome note.');
+  await dialog.getByRole('button', { name: 'Create finding' }).click();
+  await expect(dialog).not.toBeVisible();
+
+  // Publish immediately, then change nothing else.
+  await page.getByRole('button', { name: 'Run readiness check' }).click();
+  await expect(page.getByRole('heading', { name: 'Ready to share' })).toBeVisible();
+  await page.getByRole('button', { name: 'Publish release package' }).click();
+
+  // The frozen package must match the workspace, including the unlinked finding.
+  const viewer = page.getByRole('dialog');
+  await expect(viewer.getByRole('heading', { name: /REL-\d{4}/ })).toBeVisible();
+  await expect(viewer.getByText('Matches the current workspace')).toBeVisible();
+  await expect(viewer.getByText('Welcome note cue for opening night')).toBeVisible();
+  await viewer.getByRole('button', { name: 'Close', exact: true }).click();
+
+  // The registry row agrees right away, and still agrees after a reload.
+  const registry = page.getByRole('region', { name: 'Published release packages' });
+  await expect(registry.getByText('All current')).toBeVisible();
+  await page.reload();
+  const reloadedRegistry = page.getByRole('region', { name: 'Published release packages' });
+  await expect(reloadedRegistry.getByText('All current')).toBeVisible();
+});

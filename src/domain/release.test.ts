@@ -132,6 +132,31 @@ describe('release drift', () => {
     expect(addedDrift.entries.some((entry) => entry.id === 'artifact-new' && entry.change === 'added')).toBe(true);
   });
 
+  it('does not drift immediately after publishing a plan that includes a new finding without links', () => {
+    const state = readyState();
+    const now = '2026-09-05T11:00:00.000Z';
+    // Mirrors the canonical shape produced by the addIssue command: empty links
+    // are not own properties at all (not even explicit undefined keys).
+    const withFinding: WorkspaceState = {
+      ...state,
+      issues: [...state.issues, {
+        id: 'issue-unlinked-note',
+        title: 'Opening remarks should mention object handling',
+        description: 'Floor staff need a one-line reminder for the opening speech.',
+        severity: 'note',
+        status: 'open',
+        owner: 'Nadia Park',
+        createdAt: now,
+        updatedAt: now,
+      }],
+    };
+    const release = buildReleasePackage(withFinding, readyResult(withFinding));
+    expect(release.issues.some((issue) => issue.id === 'issue-unlinked-note')).toBe(true);
+    const drift = assessReleaseDrift(release, withFinding);
+    expect(drift.drifted).toBe(false);
+    expect(drift.entries).toEqual([]);
+  });
+
   it('does not drift when issue records lose and regain optional links through persistence', () => {
     const state = readyState();
     const release = buildReleasePackage(state, readyResult(state));
