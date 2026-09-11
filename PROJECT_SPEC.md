@@ -65,7 +65,7 @@ Feature pages call state commands. State commands validate through the domain mo
 
 - Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
-- Local persistence key: `exhibit-flow.workspace.v1`.
+- Local persistence keys: `exhibit-flow.workspace.v1` (stable checkpoint, mirrored in `exhibit-flow.workspace.v1.alt`) and `exhibit-flow.workspace.journal.v1` (recoverable command log replayed after incomplete writes).
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.
 
 ## Validation plan

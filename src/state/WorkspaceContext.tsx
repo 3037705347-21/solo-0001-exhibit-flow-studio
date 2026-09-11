@@ -1,11 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import type { WorkspaceAction } from './actions';
+import { describeRecovery, openWorkspaceStore, type RecoveryNotice, type WorkspaceStore } from './persistence';
+import type { RecoveryReport } from './journal';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -18,6 +20,8 @@ interface CommandResult<T = undefined> {
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
+  recovery: RecoveryReport;
+  recoveryNotice: RecoveryNotice | null;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
@@ -34,12 +38,34 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
+  // The store is opened once per provider instance. Opening runs recovery:
+  // it loads the newest verified checkpoint and replays any journaled
+  // commands that came after it, so `store.state` is already fully restored.
+  const storeRef = useRef<WorkspaceStore | null>(null);
+  if (storeRef.current === null) storeRef.current = openWorkspaceStore();
+  const store = storeRef.current;
+
+  const [state, baseDispatch] = useReducer(workspaceReducer, store.state);
   const [storageHealthy, setStorageHealthy] = useState(true);
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
 
   useEffect(() => {
-    setStorageHealthy(saveWorkspace(state));
-  }, [state]);
+    setStorageHealthy(store.commit(state));
+  }, [state, store]);
+
+  // Commands are validated against the domain rules (via the reducer) before
+  // being written to the journal, so failed commands never enter the log and
+  // the log is always written ahead of the stable checkpoint.
+  const dispatch = useCallback((action: WorkspaceAction) => {
+    const current = stateRef.current;
+    const next = workspaceReducer(current, action);
+    store.journal(action, current);
+    stateRef.current = next;
+    baseDispatch(action);
+  }, [store]);
+
+  const recoveryNotice = useMemo(() => describeRecovery(store.report), [store]);
 
   const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
     const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
@@ -111,7 +137,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const issue = state.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
     try {
-      dispatch({ type: 'issue/transition', issueId, status });
+      dispatch({ type: 'issue/transition', issueId, status, at: new Date() });
       return { ok: true };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
@@ -136,11 +162,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
-  const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
+  const resetWorkspace = useCallback(() => {
+    const seed = createSeedWorkspace();
+    // Reset starts a fresh journal generation and rewrites both checkpoints,
+    // so no pre-reset history can resurface during a later recovery.
+    store.reset(seed);
+    stateRef.current = seed;
+    baseDispatch({ type: 'workspace/reset', state: seed });
+  }, [store]);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
+    recovery: store.report,
+    recoveryNotice,
     upsertArtifact,
     removeArtifact,
     assignArtifact,
@@ -152,7 +187,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, store, recoveryNotice, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
