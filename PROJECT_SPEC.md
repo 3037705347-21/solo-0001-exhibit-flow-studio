@@ -39,6 +39,10 @@ The user opens the review view, creates a finding linked to an object or zone, m
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
 
+### 5. Merge another workspace or snapshot
+
+The user imports a JSON workspace file (or pastes JSON) from the collection view. Objects are matched by normalized accession ID and findings by title plus their linked object or zone. The reconciliation workbook lists new, identical, and conflicting records, showing current, incoming, and merged values field by field. The user keeps either side per field or accepts the merged record, and must explicitly settle reference conflicts (findings pointing at missing objects or zones). Nothing is committed until every record is decided; the commit is atomic, preserves artifact IDs so placements and finding links remain valid, and repeating the same import is a no-op.
+
 ## State and rules
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
@@ -50,6 +54,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
+- Workspace merges match on stable identities (accession ID; finding title plus linked identity), require every conflict to be decided before an atomic commit, and preserve placement/finding references and existing record availability. Re-applying the same import creates no duplicates.
 
 ## Modules and dependency direction
 
@@ -71,8 +76,8 @@ Feature pages call state commands. State commands validate through the domain mo
 ## Validation plan
 
 - TypeScript compilation and Vite production build.
-- Vitest unit tests for artifact validation, journey constraint analysis, transitions, reducer commands, persistence fallback, and readiness.
-- Playwright browser workflow checks for each of the four workflows using the public routes and visible controls.
+- Vitest unit tests for artifact validation, merge/reconciliation planning and atomic application, journey constraint analysis, transitions, reducer commands, persistence fallback, and readiness.
+- Playwright browser workflow checks for each workflow using the public routes and visible controls, including the four merge inputs: field conflicts, reference conflicts, identical records, and repeat confirmation.
 - Generic project audit verifies source scale, manifest consistency, and every declared command.
 
 ## Intentionally omitted

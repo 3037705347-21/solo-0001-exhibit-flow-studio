@@ -24,7 +24,7 @@ npm run check       # all checks in sequence
 
 - `src/domain`: entities, validation boundaries, journey analysis, state transitions, readiness, and scenario projection.
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
-- `src/features/collection`: searchable object library and validated editor.
+- `src/features/collection`: searchable object library, validated editor, and workspace merge/reconciliation workbook.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
 - `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
@@ -35,6 +35,16 @@ npm run check       # all checks in sequence
 - Object records accept accession ID, title, maker, period, medium, origin, dimensions, dwell time, narrative role, sensitivity, access need, tags, and key-object status.
 - Review findings accept severity, owner, optional zone/object links, and decision context.
 - A successful readiness check enables a JSON file named `exhibit-flow-snapshot-YYYY-MM-DD.json` containing the project, sequenced zones, objects, summary metrics, and unresolved non-blocking issues.
+
+## Merging another workspace
+
+**Merge workspace** in the collection view imports a JSON file or pasted JSON shaped as `{ artifacts: [...], findings: [...] }` (snapshot exports with `zones[].artifacts` are also accepted). Reconciliation is identity-based:
+
+- Objects match on normalized accession ID; findings match on title plus their linked object accession / zone short label, so re-importing the same file never duplicates records.
+- Each conflicting field is shown side by side — current record, incoming record, and the merged result — and can be kept from either side; whole-record *keep current*, *take incoming*, and *accept merged* choices are available.
+- Findings referencing objects or zones missing from both sides are blocked as reference conflicts until explicitly imported without the link or skipped.
+- The commit button stays disabled until every conflict is decided; `applyMergePlan` is atomic, preserves artifact IDs so placements and finding links stay intact, and sweeps reference integrity before persisting. A blocked merge changes nothing.
+- Merging content-affecting changes returns a `ready` project to `review`, matching other plan edits.
 
 ## Design notes
 

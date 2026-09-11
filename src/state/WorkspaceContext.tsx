@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { applyMergePlan, buildMergePlan, type MergeImportPayload, type MergePlan } from '../domain/merge';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
@@ -28,6 +29,8 @@ interface WorkspaceContextValue {
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
+  planMerge: (payload: MergeImportPayload) => MergePlan;
+  commitMerge: (plan: MergePlan) => CommandResult;
   resetWorkspace: () => void;
 }
 
@@ -136,6 +139,33 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
+  const planMerge = useCallback((payload: MergeImportPayload): MergePlan => {
+    return buildMergePlan(state, payload, () => createId('import'));
+  }, [state]);
+
+  const commitMerge = useCallback((plan: MergePlan): CommandResult => {
+    try {
+      const beforeArtifacts = new Set(state.artifacts.map((artifact) => artifact.accessionId));
+      const mergedState = applyMergePlan(state, plan);
+      const addedArtifacts = mergedState.artifacts.filter((artifact) => !beforeArtifacts.has(artifact.accessionId)).length;
+      const updatedArtifacts = plan.artifactEntries.filter((entry) => entry.kind === 'conflict').length;
+      const updatedFindings = plan.findingEntries.filter((entry) => entry.kind === 'field-conflict').length;
+      const addedFindings = plan.findingEntries.filter(
+        (entry) => (entry.kind === 'new' || entry.kind === 'reference-conflict') && entry.entryResolution !== 'skip',
+      ).length;
+      const skipped = plan.artifactEntries.filter((entry) => entry.entryResolution === 'skip').length
+        + plan.findingEntries.filter((entry) => entry.entryResolution === 'skip').length;
+      dispatch({
+        type: 'workspace/merge',
+        state: mergedState,
+        summary: { addedArtifacts, updatedArtifacts, addedFindings, updatedFindings, skipped },
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The merge could not be committed.' };
+    }
+  }, [state]);
+
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
@@ -151,8 +181,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    planMerge,
+    commitMerge,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, planMerge, commitMerge, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

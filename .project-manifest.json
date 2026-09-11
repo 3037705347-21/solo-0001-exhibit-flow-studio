@@ -55,6 +55,16 @@
       "failure": "out-of-range inputs are constrained and baseline state remains intact",
       "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
       "module_ids": ["app", "insights", "state", "domain", "components"]
+    },
+    {
+      "id": "merge-workspaces",
+      "name": "Merge another workspace",
+      "entry": "Merge workspace action on browser route /collection",
+      "steps": ["import workspace or snapshot JSON", "reconcile field and reference conflicts by stable identity", "commit the atomic merge and re-run the same import to confirm idempotency"],
+      "success": "chosen field values, placements, finding links, and readiness state remain referentially intact",
+      "failure": "unresolved conflicts and dangling references block the commit and leave the existing workspace untouched",
+      "verification": "Playwright drives field conflicts, reference conflicts, identical records, and repeat-confirmation inputs through the merge workbook",
+      "module_ids": ["app", "collection", "state", "domain", "components"]
     }
   ]
 }

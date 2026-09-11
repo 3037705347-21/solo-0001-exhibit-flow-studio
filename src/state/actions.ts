@@ -10,4 +10,14 @@ export type WorkspaceAction =
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
+  | { type: 'workspace/merge'; state: WorkspaceState; summary: MergeCommitSummary }
   | { type: 'workspace/reset'; state: WorkspaceState };
+
+export interface MergeCommitSummary {
+  addedArtifacts: number;
+  updatedArtifacts: number;
+  addedFindings: number;
+  updatedFindings: number;
+  skipped: number;
+}
+

@@ -95,6 +95,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'workspace/merge':
+      return stamp(regressReadyProject(action.state));
     case 'workspace/reset':
       return action.state;
     default:
