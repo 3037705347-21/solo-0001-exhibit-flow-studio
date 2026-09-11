@@ -2,6 +2,15 @@ import type { IssueStatus, WorkspaceState } from '../domain/models';
 import { createSeedWorkspace } from './seed';
 import { migrateWorkspace, validateReferences } from './migrations';
 
+export {
+  ARCHIVE_KEY,
+  ARCHIVE_UI_KEY,
+  loadArchiveEntries,
+  saveArchiveEntries,
+  loadArchiveSort,
+  saveArchiveSort,
+} from './archiveStore';
+
 export const STORAGE_KEY = 'exhibit-flow.workspace.v1';
 export const REVIEW_UI_KEY = 'exhibit-flow.review-ui.v1';
 

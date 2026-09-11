@@ -1,11 +1,18 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import {
+  ingestSnapshot,
+  removeArchiveEntry,
+  type ArchiveEntry,
+  type IngestOutcome,
+} from '../domain/archive';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { parseSnapshot } from '../domain/export';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import { loadArchiveEntries, loadWorkspace, saveArchiveEntries, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -13,6 +20,12 @@ interface CommandResult<T = undefined> {
   value?: T;
   errors?: Record<string, string>;
   message?: string;
+}
+
+interface ArchiveImportResult {
+  entry: ArchiveEntry;
+  outcome: IngestOutcome;
+  supersededEntry?: ArchiveEntry;
 }
 
 interface WorkspaceContextValue {
@@ -29,6 +42,9 @@ interface WorkspaceContextValue {
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
+  archiveEntries: ArchiveEntry[];
+  importArchiveFile: (raw: string, fileName: string) => CommandResult<ArchiveImportResult>;
+  removeArchive: (entryId: string) => CommandResult;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -37,9 +53,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
 
+  // Archive history is independent of the live workspace. The ref is the
+  // authoritative in-memory copy so a second import click dispatched before
+  // React flushes the first setState still sees the freshly created entry.
+  const [archiveEntries, setArchiveEntries] = useState<ArchiveEntry[]>(() => loadArchiveEntries());
+  const archiveRef = useRef(archiveEntries);
+  const [archiveStorageHealthy, setArchiveStorageHealthy] = useState(true);
+
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
+
+  useEffect(() => {
+    archiveRef.current = archiveEntries;
+    setArchiveStorageHealthy(saveArchiveEntries(archiveEntries));
+  }, [archiveEntries]);
 
   const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
     const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
@@ -138,6 +166,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
+  const importArchiveFile = useCallback((raw: string, fileName: string): CommandResult<ArchiveImportResult> => {
+    const snapshot = parseSnapshot(raw);
+    if (!snapshot) return { ok: false, message: 'This file is not a valid ExhibitFlow snapshot.' };
+    // Compute against the ref and advance it synchronously: even two import
+    // events dispatched in the same tick cannot create duplicate copies.
+    const result = ingestSnapshot(archiveRef.current, snapshot, fileName);
+    const next = result.outcome === 'duplicate'
+      ? archiveRef.current.map((entry) => entry.id === result.entry.id ? result.entry : entry)
+      : [...archiveRef.current, result.entry];
+    archiveRef.current = next;
+    setArchiveEntries(next);
+    return { ok: true, value: result };
+  }, []);
+
+  const removeArchive = useCallback((entryId: string): CommandResult => {
+    const target = archiveRef.current.find((entry) => entry.id === entryId);
+    if (!target) return { ok: false, message: 'This archive entry no longer exists.' };
+    // Deleting an archive never touches the live workspace or other versions;
+    // supersession links on surviving versions stay intact.
+    const next = removeArchiveEntry(archiveRef.current, entryId);
+    archiveRef.current = next;
+    setArchiveEntries(next);
+    return { ok: true };
+  }, []);
+
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
@@ -152,9 +205,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+    archiveEntries,
+    importArchiveFile,
+    removeArchive,
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace, archiveEntries, importArchiveFile, removeArchive]);
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return <WorkspaceContext.Provider value={{ ...value, storageHealthy: storageHealthy && archiveStorageHealthy }}>{children}</WorkspaceContext.Provider>;
 }
 
 export function useWorkspace(): WorkspaceContextValue {
