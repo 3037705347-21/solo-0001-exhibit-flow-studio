@@ -115,6 +115,84 @@ describe('deletion impact planning', () => {
     const plan = planIssueDelete(ready, 'issue-quilt-light', NOW);
     expect(plan.groups.some((group) => group.key === 'signoff')).toBe(true);
   });
+
+  it('marks an unlinked record isolated only when every impact dimension is empty', () => {
+    const state = seed();
+    // The gloves object has no placement, no finding, no package, and the plan is in review.
+    expect(planArtifactDelete(state, 'artifact-gloves', NOW).isolated).toBe(true);
+    const loneIssue: ReviewIssue = {
+      id: 'issue-lone',
+      title: 'A note without links',
+      description: 'Completely standalone finding with no object or area.',
+      severity: 'note',
+      status: 'open',
+      owner: 'Noa',
+      createdAt: '2026-09-02T10:00:00.000Z',
+      updatedAt: '2026-09-02T10:00:00.000Z',
+    };
+    expect(planIssueDelete({ ...state, issues: [...state.issues, loneIssue] }, loneIssue.id, NOW).isolated).toBe(true);
+
+    // Any single dimension populated flips the flag off.
+    expect(planArtifactDelete(state, 'artifact-tape', NOW).isolated).toBe(false); // placement + finding
+    const ready: WorkspaceState = { ...state, project: { ...state.project, stage: 'ready' } };
+    expect(planArtifactDelete(ready, 'artifact-gloves', NOW).isolated).toBe(false); // sign-off only
+    const linkedIssue = state.issues.find((issue) => issue.id === 'issue-entry-copy') as ReviewIssue;
+    expect(planIssueDelete(state, linkedIssue.id, NOW).isolated).toBe(false); // zone link
+  });
+
+  it('does not call an otherwise empty record isolated when a historical snapshot references it', () => {
+    // Gloves: unplaced, no findings — but included in a previously published plan snapshot.
+    const withSnapshot = withPublishedPackage(seed(), {
+      kind: 'snapshot',
+      artifactIds: ['artifact-gloves'],
+      issueIds: [],
+    });
+    const plan = planArtifactDelete(withSnapshot, 'artifact-gloves', NOW);
+
+    expect(plan.totalReferences).toBe(0);
+    expect(plan.isolated).toBe(false);
+    const packageGroup = plan.groups.find((group) => group.key === 'publishedPackages');
+    expect(packageGroup).toBeDefined();
+    expect(packageGroup?.items.join(' ')).toContain('stays exactly as exported');
+    // No placement/finding/signoff groups sneak in — the contradiction is only resolved.
+    expect(plan.groups.some((group) => group.key === 'placements' || group.key === 'issues' || group.key === 'signoff')).toBe(false);
+  });
+
+  it('does not call an otherwise empty record isolated when the project is signed off ready', () => {
+    const ready: WorkspaceState = { ...seed(), project: { ...seed().project, stage: 'ready' } };
+    const plan = planArtifactDelete(ready, 'artifact-gloves', NOW);
+
+    expect(plan.totalReferences).toBe(0);
+    expect(plan.isolated).toBe(false);
+    expect(plan.groups.some((group) => group.key === 'signoff')).toBe(true);
+    // No package group is invented when nothing was exported.
+    const packageGroup = plan.groups.find((group) => group.key === 'publishedPackages');
+    expect(packageGroup?.items[0]).toContain('No exported package will change');
+  });
+
+  it('treats an unlinked finding under sign-off as non-isolated and previews both link and sign-off impacts', () => {
+    const state = seed();
+    const loneIssue: ReviewIssue = {
+      id: 'issue-lone',
+      title: 'A note without links',
+      description: 'Completely standalone finding with no object or area.',
+      severity: 'note',
+      status: 'open',
+      owner: 'Noa',
+      createdAt: '2026-09-02T10:00:00.000Z',
+      updatedAt: '2026-09-02T10:00:00.000Z',
+    };
+    const ready: WorkspaceState = {
+      ...state,
+      project: { ...state.project, stage: 'ready' },
+      issues: [...state.issues, loneIssue],
+    };
+    const plan = planIssueDelete(ready, loneIssue.id, NOW);
+    expect(plan.totalReferences).toBe(0);
+    expect(plan.isolated).toBe(false);
+    expect(plan.groups.map((group) => group.key)).toContain('signoff');
+    expect(plan.groups.find((group) => group.key === 'issues')?.items).toContain('This finding is not linked to any object or area.');
+  });
 });
 
 describe('restore after delete', () => {
@@ -275,6 +353,29 @@ describe('restore conflicts from mid-flight edits', () => {
     expect(getDeletionStatus(plan.record, later.getTime())).toBe('expired');
     expect(() => commitRestore(deleted, plan.record.id, {}, later)).toThrow(/recovery window/i);
     expect(deleted.deletionRecords).toHaveLength(1);
+  });
+});
+
+describe('published package ledger immutability', () => {
+  it('keeps a frozen snapshot intact through delete and restore', () => {
+    const withSnapshot = withPublishedPackage(seed(), {
+      kind: 'snapshot',
+      fileName: 'exhibit-flow-snapshot-2026-09-01.json',
+      artifactIds: ['artifact-gloves'],
+      issueIds: [],
+    });
+    const frozen = withSnapshot.publishedPackages[0];
+
+    const plan = planArtifactDelete(withSnapshot, 'artifact-gloves', NOW);
+    expect(plan.isolated).toBe(false);
+    const deleted = applyDeletion(withSnapshot, plan.record);
+    expect(deleted.publishedPackages[0]).toEqual(frozen);
+
+    const { state: restored } = commitRestore(deleted, plan.record.id, {}, NOW);
+    expect(restored.publishedPackages[0]).toEqual(frozen);
+    // The deleted reference is still present in the ledger even after restore.
+    expect(restored.publishedPackages[0].artifactIds).toContain('artifact-gloves');
+    expect(restored.artifacts.some((artifact) => artifact.id === 'artifact-gloves')).toBe(true);
   });
 });
 

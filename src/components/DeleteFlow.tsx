@@ -59,7 +59,7 @@ export function DeleteFlowDialog({
   >
     <div className="delete-flow">
       <div className="delete-target-line"><ShieldAlert size={16} /><span>You are deleting <strong>{targetLabel}</strong>. Here is exactly what changes after the delete.</span></div>
-      {plan.totalReferences === 0 && <div className="delete-impact-group delete-empty-impact">
+      {plan.isolated && <div className="delete-impact-group delete-empty-impact">
         <div className="eyebrow">NOTHING ELSE REFERENCES THIS RECORD</div>
         <p>No placements, findings, sign-offs, or exported materials depend on this {KIND_LABEL[kind]}. Only this single record is removed.</p>
       </div>}

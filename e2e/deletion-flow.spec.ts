@@ -148,6 +148,33 @@ test('deleting an exhibition area returns its objects to the queue and the resto
   await expect(page.getByText('Mended Serving Bowl').first()).toBeVisible();
 });
 
+test('empty record under a ready sign-off is not labelled isolated and previews the sign-off regression', async ({ page }) => {
+  await resetPlan(page);
+  await page.goto('/review');
+
+  // The only readiness blocker is the seed's critical (in-progress) finding.
+  await page.locator('.issue-row', { hasText: 'Add transcript beside oral history station' })
+    .getByRole('button', { name: 'Resolve' }).click();
+  await page.getByRole('button', { name: 'Run readiness check' }).click();
+  await expect(page.getByText('Ready to share').first()).toBeVisible();
+
+  // Delete an object with no placement and no findings while the plan is signed off.
+  await page.goto('/collection');
+  await page.getByLabel('Search collection').fill('Gloves');
+  await page.getByRole('button', { name: /Delete object/ }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Delete object' });
+  await expect(dialog).toBeVisible();
+  // The "nothing else references this record" banner must not contradict the groups.
+  await expect(dialog.getByText(/Nothing else references this record/i)).toHaveCount(0);
+  await expect(dialog.getByText(/Readiness sign-off/i)).toBeVisible();
+  await expect(dialog.getByText(/returns to review/i)).toBeVisible();
+  await expect(dialog.getByText(/No exported package will change/i)).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Delete object' }).click();
+  // The ready sign-off actually regresses on confirm.
+  await expect(page.locator('.badge', { hasText: 'In review' })).toBeVisible();
+});
+
 test('restore surfaces conflicts when the source data changed after deletion', async ({ page }) => {
   await resetPlan(page);
 

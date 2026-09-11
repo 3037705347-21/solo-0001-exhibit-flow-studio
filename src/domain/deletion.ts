@@ -30,6 +30,22 @@ export interface DeletionPlan {
   groups: DeletionImpactGroup[];
   /** Number of live references the delete will touch (zero = empty record). */
   totalReferences: number;
+  /**
+   * True only when nothing at all changes beyond the record itself: no
+   * placements, cascaded or detached findings, finding links, readiness
+   * sign-off regression, and no referenced published packages. Sign-off and
+   * export-ledger impacts must count here so the “nothing else references
+   * this record” banner can never contradict the groups below it.
+   */
+  isolated: boolean;
+}
+
+function isIsolatedPlan(state: WorkspaceState, record: DeletionRecord): boolean {
+  if (record.placements.length > 0 || record.cascadeIssues.length > 0 || record.detachments.length > 0) return false;
+  if (record.publishedPackageIds.length > 0) return false;
+  if (state.project.stage === 'ready') return false;
+  if (record.kind === 'issue' && record.issue && (record.issue.zoneId || record.issue.artifactId)) return false;
+  return true;
 }
 
 export type DeletionStatus = 'recoverable' | 'expired' | 'restored';
@@ -148,6 +164,7 @@ export function planArtifactDelete(state: WorkspaceState, artifactId: string, no
     record,
     groups,
     totalReferences: record.placements.length + record.cascadeIssues.length,
+    isolated: isIsolatedPlan(state, record),
   };
 }
 
@@ -198,6 +215,7 @@ export function planZoneDelete(state: WorkspaceState, zoneId: string, now = new 
     record,
     groups,
     totalReferences: record.placements.length + record.detachments.length,
+    isolated: isIsolatedPlan(state, record),
   };
 }
 
@@ -224,7 +242,7 @@ export function planIssueDelete(state: WorkspaceState, issueId: string, now = ne
   groups.push(...signoffGroup(state));
   groups.push(...publishedGroups(state.publishedPackages.filter((pkg) => record.publishedPackageIds.includes(pkg.id))));
 
-  return { record, groups, totalReferences: links.length };
+  return { record, groups, totalReferences: links.length, isolated: isIsolatedPlan(state, record) };
 }
 
 export function planDelete(state: WorkspaceState, kind: DeletionTargetKind, targetId: string, now = new Date()): DeletionPlan {
