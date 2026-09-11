@@ -1,4 +1,7 @@
 import { analyzeJourney, getUnplacedArtifacts } from '../domain/journeyAnalysis';
+import { artifactDeleteImpact, artifactNodeId, findNode } from '../domain/lineage';
+import type { DeleteImpact } from '../domain/lineage';
+import { artifactLineage, issueLineage, placementLineage } from '../domain/lineageView';
 import { issueProgress } from '../domain/reviewRules';
 import type { Artifact, ReviewIssue, WorkspaceState, Zone } from '../domain/models';
 
@@ -36,4 +39,42 @@ export function selectWorkspaceSummary(state: WorkspaceState) {
     openIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
     criticalIssues: state.issues.filter((issue) => issue.severity === 'critical' && issue.status !== 'resolved'),
   };
+}
+
+export function selectArtifactLineage(state: WorkspaceState, artifactId: string) {
+  return artifactLineage(state, artifactId);
+}
+
+export function selectPlacementLineage(state: WorkspaceState, artifactId: string) {
+  return placementLineage(state, artifactId);
+}
+
+export function selectIssueLineage(state: WorkspaceState, issueId: string) {
+  return issueLineage(state, issueId);
+}
+
+export function selectArtifactDeleteImpact(state: WorkspaceState, artifactId: string): DeleteImpact {
+  return artifactDeleteImpact(state.lineage, artifactId);
+}
+
+export function selectRecordNeedsReview(state: WorkspaceState, nodeId: string): boolean {
+  const node = findNode(state.lineage, nodeId);
+  return Boolean(node?.staleReason);
+}
+
+export function selectArtifactNodeHealth(state: WorkspaceState, artifactId: string) {
+  const node = findNode(state.lineage, artifactNodeId(artifactId));
+  return {
+    staleReason: node?.staleReason,
+    tombstoned: node?.tombstoned ?? false,
+    origin: node?.origin,
+    batchFileName: node?.batchFileName,
+  };
+}
+
+/** Published package nodes, newest first, with current dependency health. */
+export function selectPublishedSnapshots(state: WorkspaceState) {
+  return state.lineage.nodes
+    .filter((node) => node.type === 'snapshot')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

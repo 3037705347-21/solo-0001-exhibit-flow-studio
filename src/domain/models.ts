@@ -77,6 +77,59 @@ export interface ExhibitProject {
   lastReadinessCheck?: string;
 }
 
+export type LineageNodeType = 'artifact' | 'placement' | 'issue' | 'snapshot' | 'batch';
+export type LineageOrigin = 'direct' | 'import' | 'seed' | 'backfill';
+export type StaleReason = 'source-modified' | 'source-deleted' | 'source-removed' | 'upstream-stale';
+
+export interface LineageNode {
+  id: string;
+  type: LineageNodeType;
+  label: string;
+  origin: LineageOrigin;
+  batchId?: string;
+  batchFileName?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Stable content fingerprint so repeat imports/identical edits do not flag stale. */
+  signature?: string;
+  staleReason?: StaleReason;
+  staleSince?: string;
+  tombstoned: boolean;
+  tombstonedAt?: string;
+  /** Context captured for deleted sources, e.g. the zone a placement lived in. */
+  contextLabel?: string;
+}
+
+export type LineageEdgeReason =
+  | 'assigned'
+  | 'linked'
+  | 'included-in'
+  | 'exported'
+  | 'generated'
+  | 'depends-on';
+
+export interface LineageEdge {
+  id: string;
+  upstream: string;
+  downstream: string;
+  reason: LineageEdgeReason;
+  createdAt: string;
+}
+
+export interface ImportBatch {
+  id: string;
+  fileName: string;
+  contentHash: string;
+  importedAt: string;
+  artifactIds: string[];
+}
+
+export interface LineageState {
+  nodes: LineageNode[];
+  edges: LineageEdge[];
+  batches: ImportBatch[];
+}
+
 export interface WorkspaceState {
   version: 1;
   project: ExhibitProject;
@@ -84,6 +137,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  lineage: LineageState;
   lastSavedAt?: string;
 }
 
@@ -175,6 +229,17 @@ export interface ScenarioProjection {
   recommendations: string[];
 }
 
+export interface SnapshotDependency {
+  nodeId: string;
+  type: LineageNodeType;
+  label: string;
+  origin: LineageOrigin;
+  status: 'valid' | 'needs-review';
+  staleReason?: StaleReason;
+  batchFileName?: string;
+  dependsOn: string[];
+}
+
 export interface Snapshot {
   schemaVersion: 1;
   generatedAt: string;
@@ -187,4 +252,11 @@ export interface Snapshot {
   };
   zones: Array<Zone & { artifacts: Artifact[] }>;
   unresolvedIssues: ReviewIssue[];
+  lineage: {
+    snapshotNodeId: string;
+    dependencyCount: number;
+    needsReviewCount: number;
+    importedCount: number;
+    dependencies: SnapshotDependency[];
+  };
 }

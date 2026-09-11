@@ -1,4 +1,5 @@
-import type { WorkspaceState } from '../domain/models';
+import { EMPTY_LINEAGE, reconcileLineage } from '../domain/lineage';
+import type { LineageState, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
   id: string;
@@ -21,7 +22,14 @@ interface LegacyWorkspace {
   zones?: LegacyZone[];
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
+  lineage?: LineageState;
   lastSavedAt?: string;
+}
+
+function isValidLineage(value: unknown): value is LineageState {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<LineageState>;
+  return Array.isArray(candidate.nodes) && Array.isArray(candidate.edges) && Array.isArray(candidate.batches);
 }
 
 export function migrateWorkspace(value: unknown): WorkspaceState | null {
@@ -32,6 +40,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     ...zone,
     sequence: typeof zone.sequence === 'number' ? zone.sequence : index,
   }));
+  const lineage = isValidLineage(source.lineage) ? source.lineage : EMPTY_LINEAGE;
   return {
     version: 1,
     project: source.project,
@@ -39,7 +48,23 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     zones,
     issues: source.issues,
     preferences: source.preferences,
+    lineage,
     lastSavedAt: source.lastSavedAt,
+  };
+}
+
+/**
+ * Reconcile lineage for workspaces created before provenance existed. Because
+ * every node and edge has a deterministic id, running this on a workspace that
+ * already has lineage is a no-op: importing the same file twice can never
+ * regenerate relationships.
+ */
+export function ensureLineage(state: WorkspaceState): WorkspaceState {
+  const hasStructuralLineage = state.lineage.nodes.some((node) => node.type === 'artifact');
+  if (hasStructuralLineage) return state;
+  return {
+    ...state,
+    lineage: reconcileLineage(state.lineage, state.artifacts, state.zones, state.issues, 'backfill'),
   };
 }
 

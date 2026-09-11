@@ -1,3 +1,4 @@
+import { previewSnapshotDependencies, snapshotNodeId } from './lineage';
 import type { JourneyAnalysis, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from './models';
 
 export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalysis, at = new Date()): ReadinessResult {
@@ -37,15 +38,44 @@ export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalys
   };
 }
 
+export interface ExportCheck {
+  ready: boolean;
+  blockers: string[];
+  cautions: string[];
+  needsReviewCount: number;
+  deletedCount: number;
+}
+
+/**
+ * Pre-export dependency check over the prospective package: the reference
+ * closure must not contain deleted sources, and stale records are surfaced as
+ * re-review cautions rather than shown as fully valid.
+ */
+export function checkExportDependencies(state: WorkspaceState, generatedAt: string): ExportCheck {
+  const nodeId = snapshotNodeId(generatedAt);
+  const check = previewSnapshotDependencies(state, nodeId);
+  return {
+    ready: check.deletedSources.length === 0,
+    blockers: check.blockers,
+    cautions: check.cautions,
+    needsReviewCount: check.needsReview.length,
+    deletedCount: check.deletedSources.length,
+  };
+}
+
 export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, readiness: ReadinessResult): Snapshot {
   if (!readiness.ready) {
     throw new Error('A snapshot can only be created when the plan passes readiness checks.');
   }
   const artifactById = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
+  const generatedAt = readiness.checkedAt;
+  const nodeId = snapshotNodeId(generatedAt);
+  const dependencyCheck = previewSnapshotDependencies(state, nodeId);
+  const dependencies = dependencyCheck.dependencies;
   return {
     schemaVersion: 1,
-    generatedAt: readiness.checkedAt,
-    project: { ...state.project, stage: 'ready', lastReadinessCheck: readiness.checkedAt },
+    generatedAt,
+    project: { ...state.project, stage: 'ready', lastReadinessCheck: generatedAt },
     summary: {
       artifactCount: state.artifacts.length,
       zoneCount: state.zones.length,
@@ -61,6 +91,13 @@ export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, 
           .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact)),
       })),
     unresolvedIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
+    lineage: {
+      snapshotNodeId: nodeId,
+      dependencyCount: dependencies.length,
+      needsReviewCount: dependencyCheck.needsReview.length,
+      importedCount: dependencies.filter((dependency) => dependency.origin === 'import').length,
+      dependencies,
+    },
   };
 }
 

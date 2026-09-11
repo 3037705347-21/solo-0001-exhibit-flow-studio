@@ -1,6 +1,7 @@
+import { reconcileLineage } from '../domain/lineage';
 import type { WorkspaceState } from '../domain/models';
 
-export function createSeedWorkspace(): WorkspaceState {
+function buildSeedWorkspace(): WorkspaceState {
   return {
     version: 1,
     project: {
@@ -270,6 +271,15 @@ export function createSeedWorkspace(): WorkspaceState {
       accessibilityPriority: 70,
       groupSize: 6,
     },
+    lineage: { nodes: [], edges: [], batches: [] },
     lastSavedAt: '2026-09-01T14:30:00.000Z',
+  };
+}
+
+export function createSeedWorkspace(): WorkspaceState {
+  const seed = buildSeedWorkspace();
+  return {
+    ...seed,
+    lineage: reconcileLineage(seed.lineage, seed.artifacts, seed.zones, seed.issues, 'seed'),
   };
 }
