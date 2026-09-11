@@ -1,4 +1,4 @@
-import type { WorkspaceState } from '../domain/models';
+import type { PlanApproval, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
   id: string;
@@ -21,7 +21,17 @@ interface LegacyWorkspace {
   zones?: LegacyZone[];
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
+  approval?: unknown;
   lastSavedAt?: string;
+}
+
+function isPlanApproval(value: unknown): value is PlanApproval {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<PlanApproval>;
+  return typeof candidate.approver === 'string'
+    && typeof candidate.approvedAt === 'string'
+    && typeof candidate.planVersion === 'string'
+    && (candidate.status === 'active' || candidate.status === 'stale');
 }
 
 export function migrateWorkspace(value: unknown): WorkspaceState | null {
@@ -39,6 +49,10 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     zones,
     issues: source.issues,
     preferences: source.preferences,
+    // Pre-sign-off workspaces carry no approval. Only a well-formed record written
+    // by the sign-off command is kept; a legacy ready project is never given a
+    // fabricated one and must be confirmed again before publishing.
+    approval: isPlanApproval(source.approval) ? source.approval : undefined,
     lastSavedAt: source.lastSavedAt,
   };
 }

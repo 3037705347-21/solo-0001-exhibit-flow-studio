@@ -1,9 +1,18 @@
+import { invalidateApproval } from '../domain/approval';
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
 function stamp(state: WorkspaceState): WorkspaceState {
   return { ...state, lastSavedAt: new Date().toISOString() };
+}
+
+// Content revisions change what readiness evaluates or what a published snapshot
+// would contain, so they regress a ready project and explicitly invalidate any
+// active sign-off with a human-readable reason. View-only actions (preferences,
+// readiness checks, sign-off itself) must not go through here.
+function contentRevision(state: WorkspaceState, reason: string): WorkspaceState {
+  return stamp(regressReadyProject(invalidateApproval(state, reason)));
 }
 
 function removeArtifactFromZones(state: WorkspaceState, artifactId: string): WorkspaceState {
@@ -59,31 +68,31 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       const artifacts = exists
         ? state.artifacts.map((artifact) => artifact.id === action.artifact.id ? action.artifact : artifact)
         : [...state.artifacts, action.artifact];
-      return stamp(regressReadyProject({ ...state, artifacts }));
+      return contentRevision({ ...state, artifacts }, 'an object was added or updated');
     }
     case 'artifact/remove': {
       const withoutPlacement = removeArtifactFromZones(state, action.artifactId);
-      return stamp(regressReadyProject({
+      return contentRevision({
         ...withoutPlacement,
         artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
         issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
-      }));
+      }, 'an object was removed from the collection');
     }
     case 'placement/assign':
-      return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
+      return contentRevision(assignArtifact(state, action.artifactId, action.zoneId, action.index), 'an object placement changed');
     case 'placement/remove':
-      return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
+      return contentRevision(removeArtifactFromZones(state, action.artifactId), 'an object was removed from the journey');
     case 'placement/reorder':
-      return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+      return contentRevision(reorderArtifact(state, action.zoneId, action.artifactId, action.direction), 'the object sequence changed');
     case 'issue/add':
-      return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
+      return contentRevision({ ...state, issues: [action.issue, ...state.issues] }, 'a review finding was added');
     case 'issue/transition':
-      return stamp(regressReadyProject({
+      return contentRevision({
         ...state,
         issues: state.issues.map((issue) =>
           issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
         ),
-      }));
+      }, 'a review finding changed status');
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
     case 'project/readiness':
@@ -95,6 +104,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'project/approve':
+      return stamp({ ...state, approval: action.approval });
     case 'workspace/reset':
       return action.state;
     default:

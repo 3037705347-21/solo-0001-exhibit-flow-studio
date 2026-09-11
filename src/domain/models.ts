@@ -77,6 +77,15 @@ export interface ExhibitProject {
   lastReadinessCheck?: string;
 }
 
+export interface PlanApproval {
+  approver: string;
+  approvedAt: string;
+  planVersion: string;
+  status: 'active' | 'stale';
+  invalidatedAt?: string;
+  invalidationReason?: string;
+}
+
 export interface WorkspaceState {
   version: 1;
   project: ExhibitProject;
@@ -84,6 +93,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  approval?: PlanApproval;
   lastSavedAt?: string;
 }
 
@@ -179,6 +189,7 @@ export interface Snapshot {
   schemaVersion: 1;
   generatedAt: string;
   project: ExhibitProject;
+  approval?: Pick<PlanApproval, 'approver' | 'approvedAt' | 'planVersion'>;
   summary: {
     artifactCount: number;
     zoneCount: number;

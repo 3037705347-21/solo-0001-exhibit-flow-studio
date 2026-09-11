@@ -19,6 +19,7 @@ The application is a pure frontend project. It does not require accounts, a serv
 - `Zone`: a sequenced part of the visitor journey with a theme, capacity, color, and artifact placements.
 - `Placement`: the assignment of an artifact to a zone and a position in that zone.
 - `ReviewIssue`: a severity-ranked finding linked to a zone or artifact, with open, in-progress, or resolved state.
+- `PlanApproval`: a local lead sign-off recording the approver, the time, and the exact plan version confirmed; required before publishing.
 - `Snapshot`: a frozen readiness summary used for local export and comparison.
 
 ## Workflows
@@ -33,7 +34,7 @@ The user opens the journey view, assigns unplaced objects to zones, changes plac
 
 ### 3. Run a review to readiness
 
-The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
+The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. Once the check passes, an accountable lead signs off on the plan, the export package, and any open reminders; the sign-off records the approver, the time, and the plan version. Only a signed-off ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
 
 ### 4. Compare planning scenarios
 
@@ -49,6 +50,9 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
+- Publishing (snapshot export) requires an active lead sign-off recorded against the current plan version; sign-off is refused while the plan is not ready.
+- Any change to objects, placements, findings, or readiness rules invalidates the sign-off with a recorded reason and returns the plan to needing confirmation; view-only and preference operations never invalidate it.
+- Workspaces saved before the sign-off policy keep their ready state but carry no approval; they need one genuine fresh confirmation and never receive a fabricated one.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
 
 ## Modules and dependency direction

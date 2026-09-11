@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { canPublish, canSignOff, computePlanVersion } from '../domain/approval';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanApproval, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -27,6 +28,7 @@ interface WorkspaceContextValue {
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
+  approvePlan: (approver: string) => CommandResult<PlanApproval>;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
 }
@@ -129,10 +131,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return result;
   }, [state]);
 
+  const approvePlan = useCallback((approver: string): CommandResult<PlanApproval> => {
+    const trimmed = approver.trim();
+    if (!trimmed) return { ok: false, errors: { approver: 'Name the accountable lead.' } };
+    const gate = canSignOff(state);
+    if (!gate.ok) return { ok: false, message: gate.message ?? 'The plan is not ready for sign-off.' };
+    const approval: PlanApproval = {
+      approver: trimmed,
+      approvedAt: new Date().toISOString(),
+      planVersion: computePlanVersion(state),
+      status: 'active',
+    };
+    dispatch({ type: 'project/approve', approval });
+    return { ok: true, value: approval };
+  }, [state]);
+
   const createSnapshot = useCallback((): CommandResult<Snapshot> => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const readiness = evaluateReadiness(state, analysis);
     if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
+    const gate = canPublish(state);
+    if (!gate.ok) return { ok: false, message: gate.message ?? 'The plan needs a current sign-off before publishing.' };
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
@@ -150,9 +169,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
+    approvePlan,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, approvePlan, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

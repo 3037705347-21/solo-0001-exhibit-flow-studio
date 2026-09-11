@@ -46,6 +46,9 @@ export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, 
     schemaVersion: 1,
     generatedAt: readiness.checkedAt,
     project: { ...state.project, stage: 'ready', lastReadinessCheck: readiness.checkedAt },
+    approval: state.approval
+      ? { approver: state.approval.approver, approvedAt: state.approval.approvedAt, planVersion: state.approval.planVersion }
+      : undefined,
     summary: {
       artifactCount: state.artifacts.length,
       zoneCount: state.zones.length,

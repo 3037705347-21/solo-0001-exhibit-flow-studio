@@ -26,7 +26,7 @@ npm run check       # all checks in sequence
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
 - `src/features/collection`: searchable object library and validated editor.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
-- `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
+- `src/features/review`: finding lifecycle, readiness gate, lead sign-off, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
 - `src/components`: shared shell, navigation, forms, badges, metrics, dialogs, and visual primitives.
 
@@ -34,7 +34,7 @@ npm run check       # all checks in sequence
 
 - Object records accept accession ID, title, maker, period, medium, origin, dimensions, dwell time, narrative role, sensitivity, access need, tags, and key-object status.
 - Review findings accept severity, owner, optional zone/object links, and decision context.
-- A successful readiness check enables a JSON file named `exhibit-flow-snapshot-YYYY-MM-DD.json` containing the project, sequenced zones, objects, summary metrics, and unresolved non-blocking issues.
+- A successful readiness check lets a lead sign off on the plan (recording approver, time, and plan version); only then does the JSON export `exhibit-flow-snapshot-YYYY-MM-DD.json` unlock. Later changes to objects, placements, or findings invalidate the sign-off until it is confirmed again.
 
 ## Design notes
 
