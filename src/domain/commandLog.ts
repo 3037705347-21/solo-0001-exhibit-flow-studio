@@ -16,6 +16,7 @@ export function describeAction(action: WorkspaceAction): string {
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
+    case 'issue/remediation-batch': return `Opened ${action.issues.length} accessibility remediation finding${action.issues.length === 1 ? '' : 's'}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';

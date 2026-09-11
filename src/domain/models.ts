@@ -56,6 +56,10 @@ export interface ReviewIssue {
   zoneId?: string;
   artifactId?: string;
   owner: string;
+  /** Stable object-fact identity for findings raised by the accessibility remediation transaction. */
+  remediationKey?: string;
+  /** Originating workflow for system-created findings. */
+  origin?: string;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;

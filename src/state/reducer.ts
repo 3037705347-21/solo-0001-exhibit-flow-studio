@@ -77,6 +77,11 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
+    case 'issue/remediation-batch':
+      // The domain transaction guarantees the batch passed idempotency and
+      // reference checks; dispatch only ever appends the full validated set.
+      if (action.issues.length === 0) return state;
+      return stamp(regressReadyProject({ ...state, issues: [...action.issues, ...state.issues] }));
     case 'issue/transition':
       return stamp(regressReadyProject({
         ...state,

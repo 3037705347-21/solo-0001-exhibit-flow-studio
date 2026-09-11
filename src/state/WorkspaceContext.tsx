@@ -1,5 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import {
+  commitAccessRemediation,
+  type RemediationRequest,
+  type RemediationResult,
+} from '../domain/accessibilityRemediation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
@@ -24,6 +29,7 @@ interface WorkspaceContextValue {
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
+  commitRemediation: (request: RemediationRequest) => RemediationResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
@@ -107,6 +113,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }, []);
 
+  const commitRemediation = useCallback((request: RemediationRequest): RemediationResult => {
+    // Validate against the latest state; any duplicate, stale reference, or
+    // missing owner aborts the batch before a single dispatch reaches storage.
+    const result = commitAccessRemediation(state, request).result;
+    if (!result.ok) return result;
+    dispatch({ type: 'issue/remediation-batch', issues: result.issues });
+    return result;
+  }, [state]);
+
   const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
     const issue = state.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
@@ -147,12 +162,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     removePlacement,
     reorderArtifact,
     addIssue,
+    commitRemediation,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, commitRemediation, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
