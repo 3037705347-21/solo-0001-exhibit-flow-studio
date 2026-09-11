@@ -1,0 +1,4 @@
+Title,Description,Severity,Owner,Zone Name,Accession ID
+Phantom zone finding,The checklist row references a zone that does not exist in the current plan.,note,Mara Chen,Phantom Wing,AF-1908-014
+Missing object finding,"The accession number was mistyped, so no object can be linked here.",warning,Theo James,Afterlives,AF-9999-999
+Good unlinked finding,This row has no links at all and still clears every validation rule.,critical,Rina Solberg,,

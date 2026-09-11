@@ -10,7 +10,16 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{
+    name: 'chromium',
+    use: {
+      ...devices['Desktop Chrome'],
+      // Runs in restricted containers that lack a Chromium sandbox.
+      launchOptions: {
+        args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      },
+    },
+  }],
   webServer: {
     command: 'npm run dev',
     url: 'http://127.0.0.1:4173',

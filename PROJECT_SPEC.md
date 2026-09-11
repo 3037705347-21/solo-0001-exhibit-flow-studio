@@ -33,7 +33,7 @@ The user opens the journey view, assigns unplaced objects to zones, changes plac
 
 ### 3. Run a review to readiness
 
-The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
+The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. A bulk importer reads a findings CSV (title, description, severity, owner, zone name, object accession ID), validates every row and its zone/object references, shows a preview split into new, ignored-duplicate, and failed rows, and commits the new rows as one atomic batch. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
 
 ### 4. Compare planning scenarios
 
@@ -49,6 +49,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
+- Imported findings start in the `open` state with the CSV-assigned owner. A title with identical zone and object links is an ignored duplicate; rows with missing fields, invalid severities, or unresolvable references fail before commit; a confirmed import applies every new row or none.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
 
 ## Modules and dependency direction

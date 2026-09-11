@@ -7,6 +7,7 @@ export type WorkspaceAction =
   | { type: 'placement/remove'; artifactId: string }
   | { type: 'placement/reorder'; zoneId: string; artifactId: string; direction: -1 | 1 }
   | { type: 'issue/add'; issue: ReviewIssue }
+  | { type: 'issue/import'; issues: ReviewIssue[] }
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }

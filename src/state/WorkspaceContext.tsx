@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { commitFindingImport, type FindingImportDraft } from '../domain/findingImport';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
@@ -24,6 +25,7 @@ interface WorkspaceContextValue {
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
+  importFindings: (drafts: FindingImportDraft[]) => CommandResult<{ createdCount: number }>;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
@@ -107,6 +109,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }, []);
 
+  const importFindings = useCallback((drafts: FindingImportDraft[]): CommandResult<{ createdCount: number }> => {
+    // Boundary re-validation makes the commit atomic: if anything in the preview
+    // has gone stale, the entire batch is rejected and nothing is dispatched.
+    const committed = commitFindingImport(drafts, state);
+    if (!committed.ok) return { ok: false, message: committed.message };
+    const issues = committed.value.issues;
+    dispatch({ type: 'issue/import', issues });
+    return { ok: true, value: { createdCount: issues.length } };
+  }, [state]);
+
   const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
     const issue = state.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
@@ -147,12 +159,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     removePlacement,
     reorderArtifact,
     addIssue,
+    importFindings,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, importFindings, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
