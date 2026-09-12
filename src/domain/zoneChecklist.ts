@@ -1,5 +1,6 @@
 import { sortZones } from './filters';
 import { formatMinutes } from './formatters';
+import { activeIssues, issueArtifactIds, issueZoneIds } from './mergeIssues';
 import type { IssueSeverity, IssueStatus, WorkspaceState, Zone } from './models';
 
 export interface ChecklistFinding {
@@ -39,7 +40,9 @@ export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = n
   if (!zone) return null;
 
   const artifactById = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
-  const unresolved = state.issues.filter((issue) => issue.status !== 'resolved');
+  // Merged sources stay in the workspace as evidence but are counted through
+  // their canonical record, so the checklist never counts a finding twice.
+  const unresolved = activeIssues(state.issues).filter((issue) => issue.status !== 'resolved');
 
   const toFinding = (scope: 'object' | 'zone') =>
     (issue: { severity: IssueSeverity; status: IssueStatus; title: string; owner: string }): ChecklistFinding => ({
@@ -51,7 +54,7 @@ export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = n
     });
 
   const zoneFindings: ChecklistFinding[] = unresolved
-    .filter((issue) => issue.zoneId === zone.id && !issue.artifactId)
+    .filter((issue) => issueZoneIds(issue).includes(zone.id) && issueArtifactIds(issue).length === 0)
     .map(toFinding('zone'));
 
   const linkedIssueIds = new Set<string>();
@@ -60,7 +63,7 @@ export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = n
       const artifact = artifactById.get(id);
       if (!artifact) return null;
       const objectFindings = unresolved
-        .filter((issue) => issue.artifactId === artifact.id)
+        .filter((issue) => issueArtifactIds(issue).includes(artifact.id))
         .map((issue) => { linkedIssueIds.add(issue.id); return toFinding('object')(issue); });
       return {
         sequence: index + 1,

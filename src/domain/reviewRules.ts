@@ -1,12 +1,15 @@
 import type { JourneyAnalysis, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from './models';
+import { activeIssues } from './mergeIssues';
 
 export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalysis, at = new Date()): ReadinessResult {
   const blockers: string[] = [];
   const cautions: string[] = [];
-  const unresolvedCritical = state.issues.filter(
+  // Merged sources are represented by their canonical record and must not count twice.
+  const countable = activeIssues(state.issues);
+  const unresolvedCritical = countable.filter(
     (issue) => issue.severity === 'critical' && issue.status !== 'resolved',
   );
-  const unresolvedWarnings = state.issues.filter(
+  const unresolvedWarnings = countable.filter(
     (issue) => issue.severity === 'warning' && issue.status !== 'resolved',
   );
 
@@ -60,11 +63,12 @@ export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, 
           .map((id) => artifactById.get(id))
           .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact)),
       })),
-    unresolvedIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
+    unresolvedIssues: activeIssues(state.issues).filter((issue) => issue.status !== 'resolved'),
   };
 }
 
 export function issueProgress(issues: ReviewIssue[]): number {
-  if (issues.length === 0) return 1;
-  return issues.filter((issue) => issue.status === 'resolved').length / issues.length;
+  const countable = activeIssues(issues);
+  if (countable.length === 0) return 1;
+  return countable.filter((issue) => issue.status === 'resolved').length / countable.length;
 }

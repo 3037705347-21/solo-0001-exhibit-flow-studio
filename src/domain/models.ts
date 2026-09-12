@@ -47,6 +47,15 @@ export interface Zone {
   artifactIds: string[];
 }
 
+export interface IssueMergeRecord {
+  canonicalId: string;
+  mergedFrom: string[];
+  reason: string;
+  mergedAt: string;
+  linkedZoneIds: string[];
+  linkedArtifactIds: string[];
+}
+
 export interface ReviewIssue {
   id: string;
   title: string;
@@ -59,6 +68,10 @@ export interface ReviewIssue {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+  /** Set on source records after a merge: points at the canonical record. */
+  mergedIntoId?: string;
+  /** Set on the canonical record produced by a merge transaction. */
+  merge?: IssueMergeRecord;
 }
 
 export interface PlanningPreferences {

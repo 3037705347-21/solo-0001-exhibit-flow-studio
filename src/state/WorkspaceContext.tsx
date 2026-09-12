@@ -2,8 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { commitMerge as commitMergeTransaction, prepareMerge, resolveCanonicalId, type MergePreview } from '../domain/mergeIssues';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -13,6 +14,12 @@ interface CommandResult<T = undefined> {
   value?: T;
   errors?: Record<string, string>;
   message?: string;
+}
+
+interface MergeCommitOptions {
+  reason: string;
+  primaryId?: string;
+  expectedFingerprint: string;
 }
 
 interface WorkspaceContextValue {
@@ -25,6 +32,8 @@ interface WorkspaceContextValue {
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
+  previewMerge: (sourceIds: string[]) => CommandResult<MergePreview>;
+  commitMerge: (sourceIds: string[], options: MergeCommitOptions) => CommandResult<ReviewIssue>;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
@@ -110,13 +119,39 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
     const issue = state.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
+    // References to a merged source are redirected to its canonical record.
+    const canonicalId = resolveCanonicalId(state.issues, issueId);
+    const target = state.issues.find((candidate) => candidate.id === canonicalId);
+    if (!target) return { ok: false, message: 'The canonical record for this finding no longer exists.' };
     try {
-      dispatch({ type: 'issue/transition', issueId, status });
-      return { ok: true };
+      dispatch({ type: 'issue/transition', issueId: target.id, status });
+      return target.id === issueId
+        ? { ok: true }
+        : { ok: true, message: `This finding was merged; the change applies to the canonical record "${target.title}".` };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
     }
   }, [state.issues]);
+
+  const previewMerge = useCallback((sourceIds: string[]): CommandResult<MergePreview> => {
+    const result = prepareMerge(state, sourceIds);
+    if (!result.ok) return { ok: false, message: result.message };
+    return { ok: true, value: result.preview };
+  }, [state]);
+
+  const commitMerge = useCallback((sourceIds: string[], options: MergeCommitOptions): CommandResult<ReviewIssue> => {
+    const result = commitMergeTransaction(state, {
+      sourceIds,
+      reason: options.reason,
+      primaryId: options.primaryId,
+      expectedFingerprint: options.expectedFingerprint,
+    });
+    if (!result.ok) return { ok: false, message: result.message };
+    if (result.changed) {
+      dispatch({ type: 'issue/merge', canonical: result.canonical, sources: result.sources });
+    }
+    return { ok: true, value: result.canonical };
+  }, [state]);
 
   const updatePreferences = useCallback((preferences: PlanningPreferences) => {
     dispatch({ type: 'preferences/update', preferences });
@@ -148,11 +183,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     reorderArtifact,
     addIssue,
     transitionReviewIssue,
+    previewMerge,
+    commitMerge,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, previewMerge, commitMerge, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

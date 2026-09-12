@@ -1,3 +1,4 @@
+import { activeIssues } from './mergeIssues';
 import type { Artifact, JourneyAnalysis, ReviewIssue, WorkspaceState } from './models';
 
 export interface PlanHealth {
@@ -12,10 +13,11 @@ export interface PlanHealth {
 function ratio(value: number, total: number): number { return total <= 0 ? 1 : Math.max(0, Math.min(1, value / total)); }
 
 export function scorePlanHealth(state: WorkspaceState, analysis: JourneyAnalysis): PlanHealth {
-  const unresolved = state.issues.filter((issue) => issue.status !== 'resolved');
+  const countable = activeIssues(state.issues);
+  const unresolved = countable.filter((issue) => issue.status !== 'resolved');
   const critical = unresolved.filter((issue) => issue.severity === 'critical');
   const completeness = (ratio(analysis.placedCount, state.artifacts.length) + analysis.keyObjectCoverage) / 2;
-  const stewardship = Math.max(0, 1 - ratio(critical.length * 2 + unresolved.length, Math.max(1, state.issues.length * 2)));
+  const stewardship = Math.max(0, 1 - ratio(critical.length * 2 + unresolved.length, Math.max(1, countable.length * 2)));
   const narrative = (analysis.roleCoverage + ratio(new Set(state.artifacts.map((artifact) => artifact.narrativeRole)).size, 4)) / 2;
   const accessNeeds = state.artifacts.filter((artifact) => artifact.accessibilityNeed !== 'none');
   const access = accessNeeds.length ? ratio(accessNeeds.length - unresolvedAccess(state, analysis), accessNeeds.length) : 1;

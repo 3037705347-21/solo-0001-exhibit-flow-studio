@@ -49,6 +49,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
+- Duplicate findings merge into one canonical record through a confirmed transaction: sources are retained as evidence, references to them redirect to the canonical record, and merged sources never count twice in readiness, checklists, or exports.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
 
 ## Modules and dependency direction

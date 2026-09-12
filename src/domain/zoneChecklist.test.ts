@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { commitMerge, prepareMerge } from './mergeIssues';
 import type { ReviewIssue, WorkspaceState } from './models';
 import { createSeedWorkspace } from '../state/seed';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from './zoneChecklist';
@@ -19,6 +20,20 @@ function issue(overrides: Partial<ReviewIssue> & Pick<ReviewIssue, 'id' | 'title
     updatedAt: '2026-09-01T10:00:00.000Z',
     ...overrides,
   };
+}
+
+function mergedState(state: WorkspaceState, ids: string[]): { state: WorkspaceState; canonical: ReviewIssue } {
+  const preview = prepareMerge(state, ids);
+  if (!preview.ok) throw new Error(`prepareMerge failed: ${preview.message}`);
+  const result = commitMerge(state, {
+    sourceIds: ids,
+    reason: 'Duplicate reports of one problem.',
+    expectedFingerprint: preview.preview.fingerprint,
+    at: new Date('2026-09-10T10:00:00.000Z'),
+    idFactory: () => 'issue-canonical-test',
+  });
+  if (!result.ok) throw new Error(`commitMerge failed: ${result.message}`);
+  return { state: result.state, canonical: result.canonical };
 }
 
 describe('buildZoneChecklist', () => {
@@ -63,6 +78,41 @@ describe('buildZoneChecklist', () => {
     const titles = checklist.entries.flatMap((entry) => entry.unresolvedFindings.map((finding) => finding.title));
     expect(titles.some((title) => title.includes('transcript'))).toBe(false);
   });
+
+  it('counts merged duplicates once through their canonical record', () => {
+    const state = stateWithIssues([
+      issue({ id: 'issue-lux-a', title: 'Quilt lux report from curator', zoneId: 'zone-common', artifactId: 'artifact-quilt', severity: 'critical' }),
+      issue({ id: 'issue-lux-b', title: 'Quilt lux report from floor walk', zoneId: 'zone-common', artifactId: 'artifact-quilt' }),
+    ]);
+    const before = buildZoneChecklist(state, 'zone-common')!;
+    expect(before.unresolvedCount).toBe(2);
+
+    const { state: merged, canonical } = mergedState(state, ['issue-lux-a', 'issue-lux-b']);
+    const after = buildZoneChecklist(merged, 'zone-common')!;
+    expect(after.unresolvedCount).toBe(1);
+
+    const quilt = after.entries.find((entry) => entry.artifactId === 'artifact-quilt')!;
+    const objectFindings = quilt.unresolvedFindings.filter((finding) => finding.scope === 'object');
+    expect(objectFindings).toHaveLength(1);
+    expect(objectFindings[0].title).toBe(canonical.title);
+    expect(objectFindings[0].severity).toBe('critical');
+  });
+
+  it('surfaces a canonical record in every linked zone without double counting', () => {
+    const state = stateWithIssues([
+      issue({ id: 'issue-zone-a', title: 'Shared problem seen in Common Thread', zoneId: 'zone-common' }),
+      issue({ id: 'issue-zone-b', title: 'Same problem seen in Afterlives', zoneId: 'zone-after' }),
+    ]);
+    const { state: merged } = mergedState(state, ['issue-zone-a', 'issue-zone-b']);
+
+    const common = buildZoneChecklist(merged, 'zone-common')!;
+    const after = buildZoneChecklist(merged, 'zone-after')!;
+    expect(common.zoneFindings.filter((finding) => finding.title === 'Shared problem seen in Common Thread')).toHaveLength(1);
+    expect(after.zoneFindings.filter((finding) => finding.title === 'Shared problem seen in Common Thread')).toHaveLength(1);
+    // Seed contributes one zone-wide finding to zone-arrival only; counts stay scoped.
+    expect(common.unresolvedCount).toBe(1);
+    expect(after.unresolvedCount).toBe(2); // canonical + seed transcript finding on the tape object
+  });
 });
 
 describe('serializeZoneChecklistCsv', () => {
@@ -81,6 +131,21 @@ describe('serializeZoneChecklistCsv', () => {
     ]);
     const csv = serializeZoneChecklistCsv(buildZoneChecklist(state, 'zone-patterns')!);
     expect(csv).toContain('"[WARNING] Mount, base loose (Jo Renner, open)"');
+  });
+
+  it('exports the canonical record once and drops merged source titles', () => {
+    const state = stateWithIssues([
+      issue({ id: 'issue-dup-a', title: 'Floor team duplicate', zoneId: 'zone-common', artifactId: 'artifact-quilt', severity: 'critical' }),
+      issue({ id: 'issue-dup-b', title: 'Curatorial duplicate', zoneId: 'zone-common', artifactId: 'artifact-quilt' }),
+    ]);
+    const { state: merged, canonical } = mergedState(state, ['issue-dup-a', 'issue-dup-b']);
+    const csv = serializeZoneChecklistCsv(buildZoneChecklist(merged, 'zone-common')!);
+
+    expect(csv).toContain(`[CRITICAL] ${canonical.title}`);
+    expect(csv).not.toContain('Curatorial duplicate');
+    expect(csv).toContain('Unresolved findings: 1');
+    // The canonical title appears exactly once across the whole CSV.
+    expect(csv.split(canonical.title).length - 1).toBe(1);
   });
 });
 

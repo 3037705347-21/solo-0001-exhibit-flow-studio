@@ -46,6 +46,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
 export function validateReferences(state: WorkspaceState): WorkspaceState {
   const artifactIds = new Set(state.artifacts.map((artifact) => artifact.id));
   const zoneIds = new Set(state.zones.map((zone) => zone.id));
+  const issueIds = new Set(state.issues.map((issue) => issue.id));
   return {
     ...state,
     zones: state.zones.map((zone) => ({ ...zone, artifactIds: zone.artifactIds.filter((id) => artifactIds.has(id)) })),
@@ -53,6 +54,17 @@ export function validateReferences(state: WorkspaceState): WorkspaceState {
       ...issue,
       zoneId: issue.zoneId && zoneIds.has(issue.zoneId) ? issue.zoneId : undefined,
       artifactId: issue.artifactId && artifactIds.has(issue.artifactId) ? issue.artifactId : undefined,
+      mergedIntoId: issue.mergedIntoId && issueIds.has(issue.mergedIntoId) && issue.mergedIntoId !== issue.id
+        ? issue.mergedIntoId
+        : undefined,
+      merge: issue.merge
+        ? {
+            ...issue.merge,
+            mergedFrom: issue.merge.mergedFrom.filter((id) => issueIds.has(id) && id !== issue.id),
+            linkedZoneIds: issue.merge.linkedZoneIds.filter((id) => zoneIds.has(id)),
+            linkedArtifactIds: issue.merge.linkedArtifactIds.filter((id) => artifactIds.has(id)),
+          }
+        : undefined,
     })),
   };
 }

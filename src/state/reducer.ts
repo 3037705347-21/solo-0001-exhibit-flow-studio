@@ -16,6 +16,32 @@ function removeArtifactFromZones(state: WorkspaceState, artifactId: string): Wor
   };
 }
 
+/**
+ * Removes issues directly linked to an artifact. Merged sources of a removed
+ * canonical record go with it; surviving canonical records simply drop the
+ * dangling references from their merge metadata.
+ */
+function removeIssuesForArtifact(state: WorkspaceState, artifactId: string): WorkspaceState['issues'] {
+  const directlyRemoved = new Set(
+    state.issues.filter((issue) => issue.artifactId === artifactId).map((issue) => issue.id),
+  );
+  const removed = new Set(directlyRemoved);
+  for (const issue of state.issues) {
+    if (issue.mergedIntoId && directlyRemoved.has(issue.mergedIntoId)) removed.add(issue.id);
+  }
+  return state.issues
+    .filter((issue) => !removed.has(issue.id))
+    .map((issue) => {
+      if (!issue.merge) return issue;
+      const mergedFrom = issue.merge.mergedFrom.filter((id) => !removed.has(id));
+      const linkedArtifactIds = issue.merge.linkedArtifactIds.filter((id) => id !== artifactId);
+      if (mergedFrom.length === issue.merge.mergedFrom.length && linkedArtifactIds.length === issue.merge.linkedArtifactIds.length) {
+        return issue;
+      }
+      return { ...issue, merge: { ...issue.merge, mergedFrom, linkedArtifactIds } };
+    });
+}
+
 function assignArtifact(state: WorkspaceState, artifactId: string, zoneId: string, index?: number): WorkspaceState {
   if (!state.artifacts.some((artifact) => artifact.id === artifactId)) {
     throw new Error('Cannot place an artifact that is not in the collection.');
@@ -66,7 +92,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject({
         ...withoutPlacement,
         artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
-        issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
+        issues: removeIssuesForArtifact(withoutPlacement, action.artifactId),
       }));
     }
     case 'placement/assign':
@@ -84,6 +110,20 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
         ),
       }));
+    case 'issue/merge': {
+      const sources = new Map(action.sources.map((source) => [source.id, source]));
+      const canonicalExists = state.issues.some((issue) => issue.id === action.canonical.id);
+      return stamp(regressReadyProject({
+        ...state,
+        issues: [
+          ...(canonicalExists ? [] : [action.canonical]),
+          ...state.issues.map((issue) => {
+            if (issue.id === action.canonical.id) return action.canonical;
+            return sources.get(issue.id) ?? issue;
+          }),
+        ],
+      }));
+    }
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
     case 'project/readiness':
