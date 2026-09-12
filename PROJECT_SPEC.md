@@ -29,7 +29,7 @@ The user opens the collection view, searches and filters existing objects, adds 
 
 ### 2. Build and validate the visitor journey
 
-The user opens the journey view, assigns unplaced objects to zones, changes placement sequence, and moves objects between zones. Two placed objects can also be exchanged through a swap transaction: a confirmation dialog previews the source and target slots plus the capacity and constraint impact on both zones, and the confirmed swap applies atomically — if either target breaks a rule or the plan changed before confirmation, neither placement moves. The domain engine recalculates zone dwell time, density, narrative coverage, and accessibility constraints after every transition. A validation panel exposes blocking errors and warnings, and links findings back to affected zones.
+The user opens the journey view, assigns unplaced objects to zones, changes placement sequence, and moves objects between zones. Two placed objects can also be exchanged through a swap transaction: a confirmation dialog previews the source and target slots plus the capacity and constraint impact on both zones, and the confirmed swap applies atomically. The confirmation is bound to the plan version captured when the dialog opens — if either target breaks a rule, or object attributes, zone capacity, zone rules, or positions changed since the preview, neither placement moves. The domain engine recalculates zone dwell time, density, narrative coverage, and accessibility constraints after every transition. A validation panel exposes blocking errors and warnings, and links findings back to affected zones.
 
 ### 3. Run a review to readiness
 

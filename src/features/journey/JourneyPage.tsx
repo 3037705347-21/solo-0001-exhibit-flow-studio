@@ -5,12 +5,11 @@ import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { Metric } from '../../components/Metric';
-import { Modal } from '../../components/Modal';
 import { ProgressBar } from '../../components/ProgressBar';
 import { SectionHeader } from '../../components/SectionHeader';
 import { analyzeJourney, canPlaceArtifact, getUnplacedArtifacts } from '../../domain/journeyAnalysis';
 import { formatMinutes, formatPercent, titleCase } from '../../domain/formatters';
-import { planArtifactSwap } from '../../domain/swap';
+import { planArtifactSwap, type SwapPreview } from '../../domain/swap';
 import type { Artifact, Zone } from '../../domain/models';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import { SwapDialog } from './SwapDialog';
@@ -19,14 +18,13 @@ export function JourneyPage() {
   const { state, assignArtifact, removePlacement, reorderArtifact, swapArtifacts } = useWorkspace();
   const [selectedArtifact, setSelectedArtifact] = useState<string | null>(null);
   const [swapSourceId, setSwapSourceId] = useState<string | null>(null);
-  const [swapPair, setSwapPair] = useState<{ firstId: string; secondId: string } | null>(null);
+  const [swapPreview, setSwapPreview] = useState<SwapPreview | null>(null);
   const [swapError, setSwapError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const analysis = useMemo(() => analyzeJourney(state.artifacts, state.zones), [state.artifacts, state.zones]);
   const unplaced = getUnplacedArtifacts(state.artifacts, state.zones);
   const artifactMap = useMemo(() => new Map(state.artifacts.map((artifact) => [artifact.id, artifact])), [state.artifacts]);
   const zoneMap = useMemo(() => new Map(state.zones.map((zone) => [zone.id, zone])), [state.zones]);
-  const swapPreview = swapPair ? planArtifactSwap(state, swapPair.firstId, swapPair.secondId) : null;
   const swapSource = swapSourceId ? artifactMap.get(swapSourceId) : undefined;
   const flash = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(null), 2800); };
   const place = (artifact: Artifact, zone: Zone) => {
@@ -41,13 +39,14 @@ export function JourneyPage() {
     if (swapSourceId === artifactId) { setSwapSourceId(null); return; }
     const sourceZone = state.zones.find((zone) => zone.artifactIds.includes(swapSourceId));
     const targetZone = state.zones.find((zone) => zone.artifactIds.includes(artifactId));
-    if (!sourceZone || !targetZone) { setSwapSourceId(null); flash('One of the objects is no longer placed.'); return; }
-    if (sourceZone.id === targetZone.id) { flash('Pick an object in another zone to complete the swap.'); return; }
-    setSwapError(null);
-    setSwapPair({ firstId: swapSourceId, secondId: artifactId });
+    if (sourceZone && targetZone && sourceZone.id === targetZone.id) { flash('Pick an object in another zone to complete the swap.'); return; }
+    const preview = planArtifactSwap(state, swapSourceId, artifactId);
     setSwapSourceId(null);
+    if (!preview) { flash('One of the objects is no longer placed.'); return; }
+    setSwapError(null);
+    setSwapPreview(preview);
   };
-  const closeSwap = () => { setSwapPair(null); setSwapError(null); };
+  const closeSwap = () => { setSwapPreview(null); setSwapError(null); };
   const confirmSwap = () => {
     if (!swapPreview) return;
     const result = swapArtifacts(swapPreview);
@@ -62,9 +61,7 @@ export function JourneyPage() {
     <div className="journey-layout"><section className="journey-board"><div className="board-header"><div><div className="eyebrow">SEQUENCE BOARD</div><h2>Visitor flow</h2></div><div className="board-legend"><span><i className="legend-dot legend-placed" /> placed</span><span><i className="legend-dot legend-issue" /> needs attention</span></div></div>
       {swapSource && <div className="swap-hint"><ArrowLeftRight size={15} /><span>Swapping <strong>{swapSource.title}</strong> — pick an object in another zone.</span><Button variant="ghost" icon={<X size={14} />} aria-label="Cancel swap" onClick={() => setSwapSourceId(null)} /></div>}
       <div className="zone-list">{state.zones.slice().sort((a, b) => a.sequence - b.sequence).map((zone, index) => <ZoneLane key={zone.id} zone={zone} index={index} artifacts={state.artifacts} analysis={analysis.zones.find((item) => item.zoneId === zone.id)} selectedArtifact={selectedArtifact} swapSourceId={swapSourceId} onSelect={setSelectedArtifact} onPlace={place} onRemove={removePlacement} onReorder={reorderArtifact} onSwap={beginSwap} />)}</div></section><aside className="journey-sidebar"><div className="panel-heading"><div><div className="eyebrow">UNPLACED</div><h3>Object queue</h3></div><Badge tone={unplaced.length ? 'warning' : 'positive'}>{unplaced.length}</Badge></div>{unplaced.length ? <div className="unplaced-list">{unplaced.map((artifact) => <button className={`unplaced-item ${selectedArtifact === artifact.id ? 'selected' : ''}`} key={artifact.id} onClick={() => setSelectedArtifact(selectedArtifact === artifact.id ? null : artifact.id)}><ArtifactGlyph color={artifact.color} size="small" /><span><strong>{artifact.title}</strong><small>{artifact.accessionId} · {titleCase(artifact.narrativeRole)}</small></span><Plus size={15} /></button>)}</div> : <EmptyState icon={<CheckCircle2 size={22} />} title="Queue is clear" detail="Every collection object has a place in the visitor journey." />}<div className="constraint-panel"><div className="panel-heading"><div><div className="eyebrow">ANALYSIS</div><h3>Constraint review</h3></div><Badge tone={analysis.blockingCount ? 'danger' : 'positive'}>{analysis.blockingCount ? 'Blocked' : 'Clear'}</Badge></div>{analysis.findings.length ? <div className="finding-list compact">{analysis.findings.slice(0, 5).map((finding) => <div className={`finding-row ${finding.type}`} key={finding.id}>{finding.type === 'error' ? <XCircle size={15} /> : finding.type === 'warning' ? <AlertTriangle size={15} /> : <Lightbulb size={15} />}<span><strong>{finding.title}</strong><small>{finding.detail}</small></span></div>)}</div> : <div className="clear-message"><CheckCircle2 size={17} /> No constraints detected</div>}</div></aside></div>
-    {swapPair && (swapPreview
-      ? <SwapDialog preview={swapPreview} artifacts={artifactMap} zones={zoneMap} error={swapError} onCancel={closeSwap} onConfirm={confirmSwap} />
-      : <Modal title="Swap unavailable" eyebrow="PLACEMENT TRANSACTION" onClose={closeSwap} footer={<Button variant="secondary" onClick={closeSwap}>Close</Button>}><p className="swap-unavailable">The plan changed before this swap could be prepared. No placements were moved.</p></Modal>)}
+    {swapPreview && <SwapDialog preview={swapPreview} artifacts={artifactMap} zones={zoneMap} error={swapError} onCancel={closeSwap} onConfirm={confirmSwap} />}
     {notice && <div className="toast toast-warning"><AlertTriangle size={16} />{notice}</div>}</div>;
 }
 

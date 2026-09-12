@@ -116,6 +116,83 @@ describe('swap application', () => {
     expect(applyArtifactSwap(reordered, request)).toBeNull();
   });
 
+  it('rejects the swap when a swapped object changes before confirmation', () => {
+    const state = createSeedWorkspace();
+    const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
+    const longer: WorkspaceState = {
+      ...state,
+      artifacts: state.artifacts.map((artifact) => artifact.id === 'artifact-lantern' ? { ...artifact, dwellMinutes: 6 } : artifact),
+    };
+    expect(applyArtifactSwap(longer, request)).toBeNull();
+    expect(placedIds(longer, 'zone-arrival')).toEqual(['artifact-lantern']);
+    expect(placedIds(longer, 'zone-patterns')).toEqual(['artifact-sample-book', 'artifact-radio']);
+    const sensitized: WorkspaceState = {
+      ...state,
+      artifacts: state.artifacts.map((artifact) => artifact.id === 'artifact-radio' ? { ...artifact, sensitivity: 'low-light' as const } : artifact),
+    };
+    expect(applyArtifactSwap(sensitized, request)).toBeNull();
+  });
+
+  it('rejects the swap when a zone-mate object changes the capacity math', () => {
+    const state = createSeedWorkspace();
+    const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
+    const edited: WorkspaceState = {
+      ...state,
+      artifacts: state.artifacts.map((artifact) => artifact.id === 'artifact-sample-book' ? { ...artifact, dwellMinutes: 9 } : artifact),
+    };
+    expect(applyArtifactSwap(edited, request)).toBeNull();
+    expect(placedIds(edited, 'zone-arrival')).toEqual(['artifact-lantern']);
+    expect(placedIds(edited, 'zone-patterns')).toEqual(['artifact-sample-book', 'artifact-radio']);
+  });
+
+  it('rejects the swap when zone capacity changes before confirmation', () => {
+    const state = createSeedWorkspace();
+    const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
+    const tightened: WorkspaceState = {
+      ...state,
+      zones: state.zones.map((zone) => zone.id === 'zone-arrival' ? { ...zone, capacityMinutes: 6 } : zone),
+    };
+    expect(applyArtifactSwap(tightened, request)).toBeNull();
+    const crowded: WorkspaceState = {
+      ...state,
+      zones: state.zones.map((zone) => zone.id === 'zone-patterns' ? { ...zone, maxObjects: 1 } : zone),
+    };
+    expect(applyArtifactSwap(crowded, request)).toBeNull();
+    expect(placedIds(tightened, 'zone-arrival')).toEqual(['artifact-lantern']);
+    expect(placedIds(tightened, 'zone-patterns')).toEqual(['artifact-sample-book', 'artifact-radio']);
+  });
+
+  it('rejects the swap when zone rules change before confirmation', () => {
+    const state = createSeedWorkspace();
+    const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
+    const darkened: WorkspaceState = {
+      ...state,
+      zones: state.zones.map((zone) => zone.id === 'zone-patterns' ? { ...zone, lowLight: false } : zone),
+    };
+    expect(applyArtifactSwap(darkened, request)).toBeNull();
+    const unseated: WorkspaceState = {
+      ...state,
+      zones: state.zones.map((zone) => zone.id === 'zone-arrival' ? { ...zone, hasSeating: true } : zone),
+    };
+    expect(applyArtifactSwap(unseated, request)).toBeNull();
+    expect(placedIds(darkened, 'zone-arrival')).toEqual(['artifact-lantern']);
+    expect(placedIds(darkened, 'zone-patterns')).toEqual(['artifact-sample-book', 'artifact-radio']);
+  });
+
+  it('still applies when only unrelated records change before confirmation', () => {
+    const state = createSeedWorkspace();
+    const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
+    const unrelated: WorkspaceState = {
+      ...state,
+      artifacts: state.artifacts.map((artifact) => artifact.id === 'artifact-quilt' ? { ...artifact, title: 'Renamed Quilt', dwellMinutes: 9 } : artifact),
+      preferences: { ...state.preferences, groupSize: 12 },
+    };
+    const next = applyArtifactSwap(unrelated, request);
+    expect(next).not.toBeNull();
+    expect(placedIds(next!, 'zone-arrival')).toEqual(['artifact-radio']);
+    expect(placedIds(next!, 'zone-patterns')).toEqual(['artifact-sample-book', 'artifact-lantern']);
+  });
+
   it('ignores a repeated confirmation without duplicating objects', () => {
     const state = createSeedWorkspace();
     const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
@@ -144,6 +221,16 @@ describe('swap through the workspace reducer', () => {
     const state = createSeedWorkspace();
     const { request } = swapPair(state, 'artifact-lantern', 'artifact-sample-book');
     expect(workspaceReducer(state, { type: 'placement/swap', request })).toBe(state);
+  });
+
+  it('leaves state untouched when the plan version changed after the request was captured', () => {
+    const state = createSeedWorkspace();
+    const { request } = swapPair(state, 'artifact-lantern', 'artifact-radio');
+    const edited: WorkspaceState = {
+      ...state,
+      artifacts: state.artifacts.map((artifact) => artifact.id === 'artifact-lantern' ? { ...artifact, dwellMinutes: 6 } : artifact),
+    };
+    expect(workspaceReducer(edited, { type: 'placement/swap', request })).toBe(edited);
   });
 
   it('regresses a ready project back to review after a swap', () => {

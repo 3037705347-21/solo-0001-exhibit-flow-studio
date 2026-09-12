@@ -8,6 +8,7 @@ export interface SwapRequest {
   secondZoneId: string;
   firstIndex: number;
   secondIndex: number;
+  version: string;
 }
 
 export interface SwapSidePreview {
@@ -39,6 +40,7 @@ export interface SwapPreview {
   errors: ConstraintFinding[];
   warnings: ConstraintFinding[];
   canSwap: boolean;
+  version: string;
 }
 
 interface Placement {
@@ -109,6 +111,28 @@ function previewZone(state: WorkspaceState, zone: Zone, outgoing: Artifact, inco
 }
 
 /**
+ * Captures every input the swap decision depends on: the capacity and rule
+ * settings of both zones and the full records of the objects currently placed
+ * in them (their dwell times feed the capacity preview). Any change to these
+ * inputs — object attributes, zone capacity, zone rules, or zone composition —
+ * produces a different version.
+ */
+function swapPlanVersion(state: WorkspaceState, firstZoneId: string, secondZoneId: string): string {
+  const byId = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
+  return JSON.stringify([firstZoneId, secondZoneId].map((zoneId) => {
+    const zone = state.zones.find((candidate) => candidate.id === zoneId);
+    return {
+      id: zoneId,
+      capacityMinutes: zone?.capacityMinutes ?? 0,
+      maxObjects: zone?.maxObjects ?? 0,
+      lowLight: zone?.lowLight ?? false,
+      hasSeating: zone?.hasSeating ?? false,
+      artifacts: (zone?.artifactIds ?? []).map((id) => byId.get(id) ?? null),
+    };
+  }));
+}
+
+/**
  * Builds the confirmation preview for exchanging two placed artifacts between
  * their zones. Returns null when the swap is structurally impossible: an
  * artifact is missing, either artifact lacks a placement, or both already
@@ -147,7 +171,8 @@ export function planArtifactSwap(state: WorkspaceState, firstArtifactId: string,
   const all = [...first.findings, ...second.findings, ...zones[0].findings, ...zones[1].findings];
   const errors = all.filter((finding) => finding.type === 'error');
   const warnings = all.filter((finding) => finding.type === 'warning');
-  return { first, second, zones, errors, warnings, canSwap: errors.length === 0 };
+  const version = swapPlanVersion(state, firstPlacement.zone.id, secondPlacement.zone.id);
+  return { first, second, zones, errors, warnings, canSwap: errors.length === 0, version };
 }
 
 export function swapRequestFromPreview(preview: SwapPreview): SwapRequest {
@@ -158,24 +183,28 @@ export function swapRequestFromPreview(preview: SwapPreview): SwapRequest {
     secondZoneId: preview.second.fromZoneId,
     firstIndex: preview.first.fromIndex,
     secondIndex: preview.second.fromIndex,
+    version: preview.version,
   };
 }
 
 /**
  * Applies a confirmed swap as a single atomic transition. Each artifact takes
  * the exact slot of the other, so every zone keeps its internal order. Returns
- * null — leaving both placements untouched — when the request no longer
- * matches the current plan or either target breaks a placement rule.
+ * null — leaving both placements untouched — when either target breaks a
+ * placement rule or the request is no longer bound to the current plan
+ * version, i.e. object attributes, zone capacity, zone rules, or positions
+ * changed after the preview was captured.
  */
 export function applyArtifactSwap(state: WorkspaceState, request: SwapRequest): WorkspaceState | null {
   const preview = planArtifactSwap(state, request.firstArtifactId, request.secondArtifactId);
   if (!preview || !preview.canSwap) return null;
-  const unchanged =
+  const stale =
     preview.first.fromZoneId !== request.firstZoneId
     || preview.second.fromZoneId !== request.secondZoneId
     || preview.first.fromIndex !== request.firstIndex
-    || preview.second.fromIndex !== request.secondIndex;
-  if (unchanged) return null;
+    || preview.second.fromIndex !== request.secondIndex
+    || preview.version !== request.version;
+  if (stale) return null;
 
   return {
     ...state,
