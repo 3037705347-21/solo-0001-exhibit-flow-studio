@@ -2,8 +2,29 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { isValidDate } from '../domain/dateMath';
+import {
+  buildRotationPlan,
+  buildRotationPlanExport,
+  moveArtifactToBatch,
+  moveArtifactToNewBatch,
+  renameRotationBatch,
+  syncConfirmedPlan,
+} from '../domain/rotation';
+import type { RotationPlanExport } from '../domain/models';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type {
+  Artifact,
+  ArtifactDraft,
+  IssueDraft,
+  IssueStatus,
+  PlanningPreferences,
+  ReadinessResult,
+  RotationPlan,
+  Snapshot,
+  WorkspaceState,
+  Zone,
+} from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -28,6 +49,14 @@ interface WorkspaceContextValue {
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
+  updateOpeningDate: (openingDate: string) => CommandResult;
+  updateZone: (zone: Zone) => CommandResult;
+  generateRotationPlan: () => CommandResult<RotationPlan>;
+  confirmRotationPlan: (planId: string) => CommandResult<RotationPlan>;
+  renameRotationBatch: (planId: string, batchId: string, label: string) => CommandResult;
+  moveRotationArtifact: (planId: string, artifactId: string, fromBatchId: string | null, toBatchId: string | 'new') => CommandResult;
+  removeRotationPlan: (planId: string) => CommandResult;
+  exportRotationPlan: (planId: string) => CommandResult<RotationPlanExport>;
   resetWorkspace: () => void;
 }
 
@@ -136,6 +165,76 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
+  const updateOpeningDate = useCallback((openingDate: string): CommandResult => {
+    if (!isValidDate(openingDate)) return { ok: false, message: 'Enter a valid opening date.' };
+    dispatch({ type: 'project/openingDate', openingDate });
+    return { ok: true };
+  }, []);
+
+  const updateZone = useCallback((zone: Zone): CommandResult => {
+    try {
+      dispatch({ type: 'zone/update', zone });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Zone could not be updated.' };
+    }
+  }, []);
+
+  const generateRotationPlan = useCallback((): CommandResult<RotationPlan> => {
+    const rotationArtifacts = state.artifacts.filter(
+      (artifact) => artifact.sensitivity === 'low-light' || artifact.sensitivity === 'fragile',
+    );
+    if (rotationArtifacts.length === 0) {
+      return { ok: false, message: 'Mark at least one object as low-light sensitive or fragile first.' };
+    }
+    const plan = buildRotationPlan(state);
+    dispatch({ type: 'rotation/generate', plan });
+    return { ok: true, value: plan };
+  }, [state]);
+
+  const confirmRotationPlan = useCallback((planId: string): CommandResult<RotationPlan> => {
+    try {
+      const plan = syncConfirmedPlan(state, planId);
+      dispatch({ type: 'rotation/replace', plans: state.rotationPlans.map((candidate) => (candidate.id === planId ? plan : candidate)) });
+      return { ok: true, value: plan };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The plan could not be confirmed.' };
+    }
+  }, [state]);
+
+  const renameBatch = useCallback((planId: string, batchId: string, label: string): CommandResult => {
+    try {
+      const plans = renameRotationBatch(state, planId, batchId, label);
+      dispatch({ type: 'rotation/replace', plans });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Batch label could not be saved.' };
+    }
+  }, [state]);
+
+  const moveRotationArtifact = useCallback((planId: string, artifactId: string, fromBatchId: string | null, toBatchId: string | 'new'): CommandResult => {
+    try {
+      const plans = toBatchId === 'new'
+        ? moveArtifactToNewBatch(state, planId, artifactId, fromBatchId)
+        : moveArtifactToBatch(state, planId, artifactId, fromBatchId, toBatchId);
+      dispatch({ type: 'rotation/replace', plans });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The batch could not be adjusted.' };
+    }
+  }, [state]);
+
+  const deleteRotationPlan = useCallback((planId: string): CommandResult => {
+    dispatch({ type: 'rotation/remove', planId });
+    return { ok: true };
+  }, []);
+
+  const exportRotationPlan = useCallback((planId: string): CommandResult<RotationPlanExport> => {
+    const plan = state.rotationPlans.find((candidate) => candidate.id === planId);
+    if (!plan) return { ok: false, message: 'The rotation plan no longer exists.' };
+    return { ok: true, value: buildRotationPlanExport(state, plan) };
+  }, [state]);
+
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
@@ -151,8 +250,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    updateOpeningDate,
+    updateZone,
+    generateRotationPlan,
+    confirmRotationPlan,
+    renameRotationBatch: renameBatch,
+    moveRotationArtifact,
+    removeRotationPlan: deleteRotationPlan,
+    exportRotationPlan,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, updateOpeningDate, updateZone, generateRotationPlan, confirmRotationPlan, renameBatch, moveRotationArtifact, deleteRotationPlan, exportRotationPlan, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

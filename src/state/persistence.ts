@@ -1,6 +1,7 @@
 import type { IssueStatus, WorkspaceState } from '../domain/models';
+import { reconcileRotationPlans } from '../domain/rotation';
 import { createSeedWorkspace } from './seed';
-import { migrateWorkspace, validateReferences } from './migrations';
+import { migrateWorkspace, sanitizeRotationPlans, validateReferences } from './migrations';
 
 export const STORAGE_KEY = 'exhibit-flow.workspace.v1';
 export const REVIEW_UI_KEY = 'exhibit-flow.review-ui.v1';
@@ -30,7 +31,11 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage):
     if (!raw) return createSeedWorkspace();
     const parsed: unknown = JSON.parse(raw);
     const migrated = migrateWorkspace(parsed);
-    return migrated && isWorkspaceState(migrated) ? validateReferences(migrated) : createSeedWorkspace();
+    if (!migrated || !isWorkspaceState(migrated)) return createSeedWorkspace();
+    const validated = validateReferences({ ...migrated, rotationPlans: sanitizeRotationPlans(migrated.rotationPlans) });
+    // Defensive: a plan restored from older storage is re-checked against the
+    // live object/zone versions so stale plans never render as confirmed.
+    return { ...validated, rotationPlans: reconcileRotationPlans(validated) };
   } catch {
     return createSeedWorkspace();
   }

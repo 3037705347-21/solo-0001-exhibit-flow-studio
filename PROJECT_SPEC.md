@@ -19,6 +19,8 @@ The application is a pure frontend project. It does not require accounts, a serv
 - `Zone`: a sequenced part of the visitor journey with a theme, capacity, color, and artifact placements.
 - `Placement`: the assignment of an artifact to a zone and a position in that zone.
 - `ReviewIssue`: a severity-ranked finding linked to a zone or artifact, with open, in-progress, or resolved state.
+- `RotationPlan`: a reviewable display/rest schedule for light-sensitive and fragile objects, with version-pinned batches.
+- `RotationBatch`: a manually adjustable group of equally sensitive objects; each batch records the object and gallery-zone versions its stints depend on and alternating display/rest segments.
 - `Snapshot`: a frozen readiness summary used for local export and comparison.
 
 ## Workflows
@@ -39,6 +41,10 @@ The user opens the review view, creates a finding linked to an object or zone, m
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
 
+### 5. Schedule conservation rotation
+
+The user opens the rotation view and generates a plan from object sensitivity, gallery light levels, the planned opening date, and per-object dwell. Low-light-sensitive and fragile objects are placed into alternating display/rest batches. The user can rename batches or move objects between same-class batches before confirming; every batch shows the exact object version and gallery-zone version it is pinned to. When an object's sensitivity, a zone's light conditions, an object placement, or the opening date changes afterwards, every affected confirmed plan is persisted and presented as needing review rather than confirmed. The user resolves review by re-confirming (which re-pins versions and rebuilds stints) or regenerating the plan. Plans persist with the workspace, older plans remain available for audit, and the schedule can be exported as JSON or CSV.
+
 ## State and rules
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
@@ -47,6 +53,10 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - A zone warns above 80% of its dwell capacity and blocks above 100%.
 - High-sensitivity objects require a low-light zone.
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
+- Rotation plans cover `low-light` and `fragile` objects; standard objects do not rotate.
+- A confirmed rotation batch pins the exact object version and gallery-zone version; a later change to the object's sensitivity or display profile, its zone, the zone's light conditions, or the opening date moves the batch and its plan into a review state with a recorded reason.
+- Batches referencing removed objects, or plans that no longer cover every sensitive object, cannot be re-confirmed until fixed or regenerated.
+- Manual batch edits return the plan to draft until it is reviewed and confirmed again.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
@@ -63,7 +73,7 @@ Feature pages call state commands. State commands validate through the domain mo
 
 ## Public interfaces
 
-- Browser routes: `/collection`, `/journey`, `/review`, and `/insights`.
+- Browser routes: `/collection`, `/journey`, `/rotation`, `/review`, and `/insights`.
 - `WorkspaceProvider` exposes typed commands and derived state to pages.
 - Local persistence key: `exhibit-flow.workspace.v1`.
 - JSON snapshot download: `exhibit-flow-snapshot-<date>.json`.

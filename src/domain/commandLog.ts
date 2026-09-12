@@ -19,6 +19,11 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'project/openingDate': return `Moved opening date to ${action.openingDate}`;
+    case 'zone/update': return 'Updated gallery zone conditions';
+    case 'rotation/generate': return `Generated ${action.plan.name}`;
+    case 'rotation/replace': return 'Adjusted rotation schedule';
+    case 'rotation/remove': return 'Removed a rotation plan';
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }

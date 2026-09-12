@@ -1,9 +1,12 @@
 export type ProjectStage = 'draft' | 'review' | 'ready';
 export type NarrativeRole = 'threshold' | 'context' | 'turning-point' | 'reflection';
 export type Sensitivity = 'standard' | 'low-light' | 'fragile';
+export type RotationClass = Exclude<Sensitivity, 'standard'>;
 export type IssueSeverity = 'note' | 'warning' | 'critical';
 export type IssueStatus = 'open' | 'in-progress' | 'resolved';
 export type AccessibilityNeed = 'none' | 'seating' | 'audio' | 'tactile-alternative';
+export type RotationPlanStatus = 'draft' | 'confirmed' | 'review';
+export type RotationBatchState = 'ok' | 'stale' | 'missing';
 
 export interface Dimensions {
   width: number;
@@ -67,6 +70,97 @@ export interface PlanningPreferences {
   groupSize: number;
 }
 
+export interface RotationStint {
+  kind: 'display' | 'rest';
+  startDate: string;
+  endDate: string;
+  zoneId?: string;
+  zoneName?: string;
+  loadMinutes: number;
+}
+
+export interface RotationDependency {
+  artifactId: string;
+  artifactTitle: string;
+  sensitivity: Sensitivity;
+  artifactVersion: string;
+  zoneId?: string;
+  zoneName?: string;
+  zoneVersion?: string;
+}
+
+export interface RotationBatch {
+  id: string;
+  label: string;
+  rotationClass: RotationClass;
+  displayDays: number;
+  restDays: number;
+  artifactIds: string[];
+  stints: RotationStint[];
+  dependencies: RotationDependency[];
+  manual: boolean;
+  updatedAt: string;
+}
+
+export interface RotationPlan {
+  id: string;
+  name: string;
+  status: RotationPlanStatus;
+  openingDate: string;
+  horizonDays: number;
+  batchIds: string[];
+  batches: RotationBatch[];
+  warnings: string[];
+  reviewReasons: string[];
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt?: string;
+}
+
+export interface RotationBatchHealth {
+  batchId: string;
+  label: string;
+  state: RotationBatchState;
+  reasons: string[];
+}
+
+export interface RotationPlanHealth {
+  planId: string;
+  status: RotationPlanStatus;
+  openingDateMismatch: boolean;
+  batches: RotationBatchHealth[];
+  reasons: string[];
+  warnings: string[];
+  uncoveredSensitive: string[];
+  canConfirm: boolean;
+  staleBatchIds: string[];
+  missingBatchIds: string[];
+}
+
+export interface RotationPlanExport {
+  schemaVersion: 1;
+  generatedAt: string;
+  planId: string;
+  planName: string;
+  planStatus: RotationPlanStatus;
+  openingDate: string;
+  horizonDays: number;
+  reviewReasons: string[];
+  warnings: string[];
+  batches: Array<{
+    batchId: string;
+    label: string;
+    rotationClass: RotationClass;
+    displayDays: number;
+    restDays: number;
+    manual: boolean;
+    state: RotationBatchState;
+    stateReasons: string[];
+    dependencies: RotationDependency[];
+    stints: RotationStint[];
+  }>;
+}
+
 export interface ExhibitProject {
   id: string;
   title: string;
@@ -84,6 +178,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  rotationPlans: RotationPlan[];
   lastSavedAt?: string;
 }
 
@@ -187,4 +282,5 @@ export interface Snapshot {
   };
   zones: Array<Zone & { artifacts: Artifact[] }>;
   unresolvedIssues: ReviewIssue[];
+  rotationPlans: RotationPlan[];
 }

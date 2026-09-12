@@ -9,6 +9,7 @@
     {"id": "collection", "path": "src/features/collection", "responsibility": "artifact discovery, filtering, creation, and editing workflow"},
     {"id": "journey", "path": "src/features/journey", "responsibility": "zone planning, placement transitions, and constraint feedback"},
     {"id": "review", "path": "src/features/review", "responsibility": "review issue lifecycle, readiness checks, and snapshot export"},
+    {"id": "rotation", "path": "src/features/rotation", "responsibility": "rotation plan generation, batch review, drift state, and schedule export"},
     {"id": "insights", "path": "src/features/insights", "responsibility": "scenario projection and plan-level analysis"},
     {"id": "components", "path": "src/components", "responsibility": "shared navigation, dialogs, feedback, charts, and UI primitives"}
   ],
@@ -55,6 +56,16 @@
       "failure": "out-of-range inputs are constrained and baseline state remains intact",
       "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
       "module_ids": ["app", "insights", "state", "domain", "components"]
+    },
+    {
+      "id": "schedule-rotation",
+      "name": "Schedule object rotation",
+      "entry": "browser route /rotation",
+      "steps": ["generate a rotation plan from sensitivity, gallery light, opening date, and dwell", "adjust batches while reviewing pinned object and gallery versions", "confirm, then let object/zone/date changes force affected batches into review", "re-confirm or regenerate to recover, and export the schedule"],
+      "success": "confirmed batches stay pinned while changed batches are presented as needing review, and plans persist with the workspace",
+      "failure": "plans referencing removed objects or newly sensitive objects cannot be re-confirmed until fixed or regenerated",
+      "verification": "Playwright generates, adjusts, confirms, drifts a plan with a gallery and object change, recovers it, and exports it",
+      "module_ids": ["app", "rotation", "state", "domain", "components"]
     }
   ]
 }

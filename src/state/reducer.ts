@@ -1,9 +1,15 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
-import type { WorkspaceState } from '../domain/models';
+import { reconcileRotationPlans } from '../domain/rotation';
+import type { WorkspaceState, Zone } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
 function stamp(state: WorkspaceState): WorkspaceState {
   return { ...state, lastSavedAt: new Date().toISOString() };
+}
+
+function reconcile(state: WorkspaceState): WorkspaceState {
+  const rotationPlans = reconcileRotationPlans(state);
+  return rotationPlans === state.rotationPlans ? state : { ...state, rotationPlans };
 }
 
 function removeArtifactFromZones(state: WorkspaceState, artifactId: string): WorkspaceState {
@@ -52,6 +58,16 @@ function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: stri
   };
 }
 
+function updateZone(state: WorkspaceState, zone: Zone): WorkspaceState {
+  if (!state.zones.some((candidate) => candidate.id === zone.id)) {
+    throw new Error('Cannot update an unknown gallery zone.');
+  }
+  return {
+    ...state,
+    zones: state.zones.map((candidate) => (candidate.id === zone.id ? zone : candidate)),
+  };
+}
+
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
     case 'artifact/upsert': {
@@ -59,22 +75,22 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       const artifacts = exists
         ? state.artifacts.map((artifact) => artifact.id === action.artifact.id ? action.artifact : artifact)
         : [...state.artifacts, action.artifact];
-      return stamp(regressReadyProject({ ...state, artifacts }));
+      return stamp(reconcile(regressReadyProject({ ...state, artifacts })));
     }
     case 'artifact/remove': {
       const withoutPlacement = removeArtifactFromZones(state, action.artifactId);
-      return stamp(regressReadyProject({
+      return stamp(reconcile(regressReadyProject({
         ...withoutPlacement,
         artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
         issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
-      }));
+      })));
     }
     case 'placement/assign':
-      return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
+      return stamp(reconcile(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index))));
     case 'placement/remove':
-      return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
+      return stamp(reconcile(regressReadyProject(removeArtifactFromZones(state, action.artifactId))));
     case 'placement/reorder':
-      return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+      return stamp(reconcile(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction))));
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
     case 'issue/transition':
@@ -95,6 +111,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'project/openingDate':
+      return stamp(reconcile(regressReadyProject({
+        ...state,
+        project: { ...state.project, openingDate: action.openingDate },
+      })));
+    case 'zone/update':
+      return stamp(reconcile(regressReadyProject(updateZone(state, action.zone))));
+    case 'rotation/generate':
+      return stamp({ ...state, rotationPlans: [...state.rotationPlans, action.plan] });
+    case 'rotation/replace':
+      return stamp({ ...state, rotationPlans: action.plans });
+    case 'rotation/remove':
+      return stamp({ ...state, rotationPlans: state.rotationPlans.filter((plan) => plan.id !== action.planId) });
     case 'workspace/reset':
       return action.state;
     default:

@@ -1,4 +1,12 @@
-import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
+import type {
+  Artifact,
+  IssueStatus,
+  PlanningPreferences,
+  ReviewIssue,
+  RotationPlan,
+  WorkspaceState,
+  Zone,
+} from '../domain/models';
 
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
@@ -10,4 +18,9 @@ export type WorkspaceAction =
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
+  | { type: 'project/openingDate'; openingDate: string }
+  | { type: 'zone/update'; zone: Zone }
+  | { type: 'rotation/generate'; plan: RotationPlan }
+  | { type: 'rotation/replace'; plans: RotationPlan[] }
+  | { type: 'rotation/remove'; planId: string }
   | { type: 'workspace/reset'; state: WorkspaceState };

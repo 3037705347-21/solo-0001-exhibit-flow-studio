@@ -61,6 +61,7 @@ export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, 
           .filter((artifact): artifact is NonNullable<typeof artifact> => Boolean(artifact)),
       })),
     unresolvedIssues: state.issues.filter((issue) => issue.status !== 'resolved'),
+    rotationPlans: state.rotationPlans,
   };
 }
 
