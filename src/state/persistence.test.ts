@@ -8,6 +8,7 @@ import {
   saveWorkspace,
   STORAGE_KEY,
 } from './persistence';
+import { createCollectionView } from '../domain/collectionViews';
 import { createSeedWorkspace } from './seed';
 
 describe('workspace persistence', () => {
@@ -24,6 +25,30 @@ describe('workspace persistence', () => {
     expect(loadWorkspace(storage).project.title).toBe(state.project.title);
     clearWorkspace(storage);
     expect(values.has(STORAGE_KEY)).toBe(false);
+  });
+
+  it('regression: a frozen list issued with zero matching members survives reload as a frozen view', () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } } as unknown as Storage;
+    const seed = createSeedWorkspace();
+    const emptyFrozen = createCollectionView({
+      id: 'view-empty-issue',
+      name: 'Nothing matched yet',
+      kind: 'frozen',
+      rules: { query: 'object-that-does-not-exist', roles: [], sensitivities: [], keyOnly: false },
+      artifacts: seed.artifacts,
+      at: '2026-09-10T12:00:00.000Z',
+    });
+    expect(emptyFrozen.frozenMembers).toEqual([]);
+    saveWorkspace({ ...seed, collectionViews: [emptyFrozen] }, storage);
+
+    const restored = loadWorkspace(storage);
+    expect(restored.collectionViews).toHaveLength(1);
+    const view = restored.collectionViews[0];
+    expect(view.kind).toBe('frozen');
+    expect(view.name).toBe('Nothing matched yet');
+    expect(view.frozenMembers).toEqual([]);
+    expect(view.ruleVersions[0].memberIds).toEqual([]);
   });
 });
 

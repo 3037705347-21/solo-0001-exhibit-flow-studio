@@ -139,6 +139,35 @@ test.describe('saved collection views', () => {
     await expect(page.getByRole('button', { name: 'Save current rules as live view' })).toBeVisible();
   });
 
+  test('keeps an empty frozen list (issued while nothing matched) after reload and route changes', async ({ page }) => {
+    await page.getByRole('button', { name: 'Filters', exact: true }).click();
+    await page.locator('.filter-drawer').getByText('Key objects only', { exact: true }).click();
+    await page.getByLabel('Search collection').fill('zzz-no-such-object');
+    await expect(page.locator('.toolbar-count')).toContainText('0 results');
+
+    // Issue the frozen list while nothing matches; zero members is a valid issue.
+    await saveView(page, 'Empty issue pack', 'frozen');
+    await expect(page.getByText('Frozen list · Empty issue pack')).toBeVisible();
+    await expect(page.getByText('issued record of 0 objects')).toBeVisible();
+    await expect(page.getByText('No objects were on this issued list')).toBeVisible();
+    await expect(page.locator('.search-box input')).toBeDisabled();
+    await expect(page.locator('.artifact-card')).toHaveCount(0);
+
+    // Reload: the frozen semantics and empty membership must be restored, not dropped.
+    await page.reload();
+    await expect(page.getByText('Frozen list · Empty issue pack')).toBeVisible();
+    await expect(page.getByText('issued record of 0 objects')).toBeVisible();
+    await expect(page.getByText('No objects were on this issued list')).toBeVisible();
+    await expect(page.locator('.search-box input')).toBeDisabled();
+
+    // Cross-route return preserves the frozen list.
+    await page.goto('/insights');
+    await page.goto('/collection');
+    await expect(page.getByText('Frozen list · Empty issue pack')).toBeVisible();
+    await expect(page.getByText('No objects were on this issued list')).toBeVisible();
+    await expect(page.locator('.search-box input')).toBeDisabled();
+  });
+
   test('records a new rule version when a live view is updated', async ({ page }) => {
     await page.getByRole('button', { name: 'Filters', exact: true }).click();
     await page.locator('.filter-drawer').getByText('Threshold', { exact: true }).click();

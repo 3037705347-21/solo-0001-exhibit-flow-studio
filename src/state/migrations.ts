@@ -1,5 +1,5 @@
 import { isCollectionFilter } from '../domain/collectionViews';
-import type { CollectionRuleVersion, CollectionView, WorkspaceState } from '../domain/models';
+import type { CollectionRuleVersion, CollectionView, FrozenMemberSnapshot, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
   id: string;
@@ -73,14 +73,23 @@ export function sanitizeCollectionViews(value: unknown): CollectionView[] {
       .filter((version): version is CollectionRuleVersion => Boolean(version))
       .sort((left, right) => left.version - right.version);
     if (!ruleVersions.length) continue;
-    const frozenMembers = candidate.kind === 'frozen' && Array.isArray(candidate.frozenMembers)
-      ? candidate.frozenMembers.filter((member) =>
-        member && typeof member === 'object'
-        && typeof member.artifactId === 'string'
-        && typeof member.accessionId === 'string'
-        && typeof member.title === 'string')
+    if (candidate.kind === 'frozen') {
+      // The issued member record must exist as an array. An empty array is a
+      // legitimate state (the list was issued while nothing matched its rules)
+      // and must survive reload; only a missing/non-array record is corrupted.
+      if (!Array.isArray(candidate.frozenMembers)) continue;
+    }
+    const frozenMembers = candidate.kind === 'frozen'
+      ? (candidate.frozenMembers as unknown[]).filter((member): member is FrozenMemberSnapshot =>
+        Boolean(member)
+        && typeof member === 'object'
+        && typeof (member as { artifactId?: unknown }).artifactId === 'string'
+        && typeof (member as { accessionId?: unknown }).accessionId === 'string'
+        && typeof (member as { title?: unknown }).title === 'string'
+        && typeof (member as { narrativeRole?: unknown }).narrativeRole === 'string'
+        && typeof (member as { sensitivity?: unknown }).sensitivity === 'string'
+        && typeof (member as { isKeyObject?: unknown }).isKeyObject === 'boolean')
       : undefined;
-    if (candidate.kind === 'frozen' && !frozenMembers?.length) continue;
     views.push({
       id: candidate.id,
       name: candidate.name,

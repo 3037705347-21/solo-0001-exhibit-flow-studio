@@ -62,11 +62,39 @@ describe('workspace migration for saved views', () => {
       id: 'view-bad-rules',
       ruleVersions: [{ ...goodLive.ruleVersions[0], rules: { query: 4 } }],
     };
-    const frozenWithoutMembers = { ...goodFrozen, id: 'view-empty-frozen', frozenMembers: [] };
-    const views = sanitizeCollectionViews([goodLive, goodFrozen, badKind, badRules, frozenWithoutMembers, { nope: true }]);
-    expect(views.map((view) => view.id)).toEqual(['view-live', 'view-frozen']);
+    // A missing member record is corrupted and dropped...
+    const frozenWithoutRecord = { ...goodFrozen, id: 'view-no-record' };
+    delete (frozenWithoutRecord as Partial<typeof frozenWithoutRecord>).frozenMembers;
+    // ...but a frozen list issued with zero matching members is legitimate and retained.
+    const emptyFrozen = { ...goodFrozen, id: 'view-empty-frozen', frozenMembers: [] };
+    const views = sanitizeCollectionViews([goodLive, goodFrozen, badKind, badRules, frozenWithoutRecord, emptyFrozen, { nope: true }]);
+    expect(views.map((view) => view.id)).toEqual(['view-live', 'view-frozen', 'view-empty-frozen']);
     expect(views[1].kind).toBe('frozen');
     expect(views[1].frozenMembers?.[0].accessionId).toBe('AF-1987-064');
+    expect(views[2].kind).toBe('frozen');
+    expect(views[2].frozenMembers).toEqual([]);
+  });
+
+  it('persists a frozen list issued while no objects matched through a full migration', () => {
+    const emptyFrozen = {
+      id: 'view-empty',
+      name: 'Empty issue',
+      kind: 'frozen',
+      createdAt: '2026-09-02T10:00:00.000Z',
+      updatedAt: '2026-09-02T10:00:00.000Z',
+      ruleVersions: [{
+        version: 1,
+        rules: { query: 'definitely-no-such-object', roles: [], sensitivities: [], keyOnly: false },
+        memberIds: [],
+        basis: 'query “definitely-no-such-object”',
+        createdAt: '2026-09-02T10:00:00.000Z',
+      }],
+      frozenMembers: [],
+    };
+    const migrated = migrateWorkspace({ ...LEGACY_STATE, collectionViews: [emptyFrozen] });
+    expect(migrated?.collectionViews).toHaveLength(1);
+    expect(migrated?.collectionViews[0].frozenMembers).toEqual([]);
+    expect(migrated?.collectionViews[0].ruleVersions[0].memberIds).toEqual([]);
   });
 
   it('preserves frozen member references even when the referenced artifact no longer exists', () => {

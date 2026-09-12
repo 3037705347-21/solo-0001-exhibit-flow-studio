@@ -304,6 +304,7 @@ function FrozenMemberList({ evaluation, onEdit, onRemove }: {
     {evaluation.isStale && <div className="drift-note" role="alert"><AlertTriangle size={15} />
       <span>This issued list no longer matches the collection: {evaluation.changedCount} member{evaluation.changedCount === 1 ? '' : 's'} changed and {evaluation.missingCount} {evaluation.missingCount === 1 ? 'was' : 'were'} deleted. The issued record below is retained as evidence; do not treat it as current data.</span>
     </div>}
+    {evaluation.entries.length === 0 && <EmptyState icon={<Snowflake size={23} />} title="No objects were on this issued list" detail="The list was issued while no objects matched its rules. Its frozen membership is intentionally empty and will stay empty." />}
     <div className="artifact-grid">{evaluation.entries.map((entry, index) => <FrozenMemberCard key={`${entry.snapshot.artifactId}-${index}`} entry={entry} onEdit={onEdit} onRemove={onRemove} />)}</div>
     {evaluation.addedArtifacts.length > 0 && <div className="added-match-note"><Radio size={14} /><span>{evaluation.addedArtifacts.length} object{evaluation.addedArtifacts.length === 1 ? '' : 's'} now match these rules but {evaluation.addedArtifacts.length === 1 ? 'was' : 'were'} not on the issued list. {evaluation.addedArtifacts.map((artifact) => artifact.title).join('; ')}.</span></div>}
   </div>;

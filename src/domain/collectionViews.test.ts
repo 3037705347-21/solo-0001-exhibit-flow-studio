@@ -124,6 +124,17 @@ describe('saved collection views', () => {
     expect(evaluation.addedArtifacts.map((artifact) => artifact.id)).toEqual(['artifact-new']);
   });
 
+  it('supports a frozen list issued while no objects match its rules', () => {
+    const noMatch: CollectionFilter = { query: 'no-such-object-in-the-collection', roles: [], sensitivities: [], keyOnly: false };
+    const view = createCollectionView({ id: 'view-empty', name: 'Empty issue', kind: 'frozen', rules: noMatch, artifacts, at: AT });
+    expect(view.frozenMembers).toEqual([]);
+    const evaluation = evaluateFrozenView(view, artifacts);
+    expect(evaluation.entries).toEqual([]);
+    expect(evaluation.isStale).toBe(false);
+    // A live object matching later is still not a member of the issued empty list.
+    expect(evaluation.addedArtifacts).toHaveLength(0);
+  });
+
   it('enforces unique names across both view kinds so the semantics cannot be confused', () => {
     const live = createCollectionView({ id: 'view-a', name: 'September Review', kind: 'live', rules: reflectionRules, artifacts, at: AT });
     const frozen = createCollectionView({ id: 'view-b', name: 'Loan Pack', kind: 'frozen', rules: reflectionRules, artifacts, at: AT });
