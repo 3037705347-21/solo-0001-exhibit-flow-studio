@@ -3,8 +3,8 @@ import type { AssignmentAuditEntry, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { createSeedWorkspace } from './seed';
 
-describe('allocation/committed reducer', () => {
-  it('adopts the authoritative state produced by the locked transaction without re-stamping', () => {
+describe('transaction/apply reducer', () => {
+  it('adopts the authoritative state produced by the locked drain without re-stamping', () => {
     const state = createSeedWorkspace();
     const committed: WorkspaceState = {
       ...state,
@@ -23,14 +23,8 @@ describe('allocation/committed reducer', () => {
       }],
       lastSavedAt: '2026-09-10T12:00:00.000Z',
     };
-    const next = workspaceReducer(state, { type: 'allocation/committed', state: committed, movedCount: 1, duplicate: false });
+    const next = workspaceReducer(state, { type: 'transaction/apply', state: committed });
     expect(next).toBe(committed);
-  });
-
-  it('does not mutate state on a duplicate confirmation marker', () => {
-    const state = createSeedWorkspace();
-    const next = workspaceReducer(state, { type: 'allocation/committed', state, movedCount: 0, duplicate: true });
-    expect(next).toBe(state);
   });
 });
 

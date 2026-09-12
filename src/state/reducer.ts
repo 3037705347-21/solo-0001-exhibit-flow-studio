@@ -1,4 +1,4 @@
-import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { regressReadyProject } from '../domain/transitions';
 import type { AssignmentAuditEntry, WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -75,22 +75,11 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
-    case 'issue/add':
-      return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
-    case 'issue/transition':
-      return stamp(regressReadyProject({
-        ...state,
-        issues: state.issues.map((issue) =>
-          issue.id === action.issueId
-            ? { ...transitionIssue(issue, action.status, action.at), version: issue.version + 1 }
-            : issue,
-        ),
-      }));
-    case 'allocation/committed':
-      // The command layer performed the cross-tab atomic transaction: it
-      // re-read shared storage under a mutex, validated every base version,
-      // wrote the result, and hands us the authoritative state. Do not stamp
-      // again — re-saving would clobber a peer commit that raced the lock.
+    case 'transaction/apply':
+      // Result of a locked transaction: the command layer re-read shared
+      // storage under the cross-tab lock, applied every queued owner/status
+      // change, stamped once, and wrote it back. Do not stamp again — a second
+      // save could clobber a peer that committed after the lock was released.
       return action.state;
     case 'workspace/syncExternal': {
       // Another tab won the allocation lock and committed. Adopt its state and

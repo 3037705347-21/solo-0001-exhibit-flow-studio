@@ -179,3 +179,77 @@ describe('commitAllocationPlan cross-tab atomicity', () => {
     expect(response.conflicts?.[0].type).toBe('owner-changed');
   });
 });
+
+describe('status transitions and allocation commits share the same write lock', () => {
+  it('serializes a transition queued ahead of an allocation against the same finding', async () => {
+    const storage = seededStorage();
+    const { result } = renderWorkspace(storage, makeLockManager());
+
+    // Batch built against the open v0 finding.
+    const draft = setDraftTarget(
+      createAllocationDraft(result.current.state.issues, ['issue-entry-copy']),
+      'issue-entry-copy',
+      'Mara Chen',
+    );
+
+    let transitionResponse: Awaited<ReturnType<typeof result.current.transitionReviewIssue>> | undefined;
+    let allocationResponse: AllocationCommandResult | undefined;
+    await act(async () => {
+      const t = result.current.transitionReviewIssue('issue-entry-copy', 'in-progress').then((r) => { transitionResponse = r; });
+      const a = result.current.commitAllocationPlan(draft).then((r) => { allocationResponse = r; });
+      await Promise.all([t, a]);
+    });
+
+    expect(transitionResponse?.ok).toBe(true);
+    // The transition committed first and bumped the base version, so the
+    // allocation plan (pinned to v0/open) is rejected wholesale — no phantom
+    // owner change and no audit entry describing a move that never happened.
+    expect(allocationResponse?.ok).toBe(false);
+    expect(allocationResponse?.conflicts?.some((c) => c.issueId === 'issue-entry-copy')).toBe(true);
+
+    const stored = JSON.parse(storage.getItem(STORAGE_KEY)!) as WorkspaceState;
+    const issue = stored.issues.find((candidate) => candidate.id === 'issue-entry-copy')!;
+    expect(issue.owner).toBe('Theo James');
+    expect(issue.status).toBe('in-progress');
+    expect(issue.version).toBe(1);
+    expect(stored.assignmentLog).toEqual([]);
+  });
+
+  it('serializes an allocation committed ahead of a transition and keeps audit consistent with the final owner', async () => {
+    const storage = seededStorage();
+    const { result } = renderWorkspace(storage, makeLockManager());
+
+    const draft = setDraftTarget(
+      createAllocationDraft(result.current.state.issues, ['issue-entry-copy']),
+      'issue-entry-copy',
+      'Mara Chen',
+    );
+
+    let allocationResponse: AllocationCommandResult | undefined;
+    let transitionResponse: Awaited<ReturnType<typeof result.current.transitionReviewIssue>> | undefined;
+    await act(async () => {
+      const a = result.current.commitAllocationPlan(draft).then((r) => { allocationResponse = r; });
+      const t = result.current.transitionReviewIssue('issue-entry-copy', 'in-progress').then((r) => { transitionResponse = r; });
+      await Promise.all([a, t]);
+    });
+
+    expect(allocationResponse?.ok).toBe(true);
+    expect(transitionResponse?.ok).toBe(true);
+
+    const stored = JSON.parse(storage.getItem(STORAGE_KEY)!) as WorkspaceState;
+    const issue = stored.issues.find((candidate) => candidate.id === 'issue-entry-copy')!;
+    // Allocation moved Theo -> Mara and bumped v0 -> v1; the transition then
+    // applied on top of Mara's copy and bumped v1 -> v2 without losing owner.
+    expect(issue.owner).toBe('Mara Chen');
+    expect(issue.status).toBe('in-progress');
+    expect(issue.version).toBe(2);
+    expect(stored.assignmentLog).toHaveLength(1);
+    expect(stored.assignmentLog[0]).toMatchObject({
+      issueId: 'issue-entry-copy',
+      fromOwner: 'Theo James',
+      toOwner: 'Mara Chen',
+      fromStatus: 'open',
+      toStatus: 'open',
+    });
+  });
+});

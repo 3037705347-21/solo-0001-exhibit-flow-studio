@@ -15,12 +15,7 @@ export function describeAction(action: WorkspaceAction): string {
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;
-    case 'issue/add': return `Created finding ${action.issue.title}`;
-    case 'issue/transition': return `Moved finding to ${action.status}`;
-    case 'allocation/committed':
-      return action.duplicate
-        ? 'Duplicate allocation confirmation ignored'
-        : `Reassigned ${action.movedCount} finding${action.movedCount === 1 ? '' : 's'} in one atomic batch`;
+    case 'transaction/apply': return 'Committed a locked review transaction';
     case 'workspace/syncExternal':
       return action.audit.length
         ? `Applied ${action.audit.length} reassignment${action.audit.length === 1 ? '' : 's'} from another session`

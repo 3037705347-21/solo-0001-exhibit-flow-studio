@@ -5,7 +5,8 @@ import { analyzeJourney } from '../domain/journeyAnalysis';
 import type { AllocationConflict, AllocationPlan } from '../domain/workload';
 import { commitAllocation } from '../domain/workload';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, AssignmentAuditEntry, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import type { Artifact, ArtifactDraft, AssignmentAuditEntry, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadStoredWorkspace, loadWorkspace, parseWorkspaceJson, saveWorkspace, STORAGE_KEY } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -33,8 +34,8 @@ interface WorkspaceContextValue {
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
-  addIssue: (draft: IssueDraft) => CommandResult;
-  transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
+  addIssue: (draft: IssueDraft) => Promise<CommandResult>;
+  transitionReviewIssue: (issueId: string, status: IssueStatus) => Promise<CommandResult>;
   commitAllocationPlan: (plan: AllocationPlan) => Promise<AllocationCommandResult>;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
@@ -44,8 +45,8 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
-/** Cross-tab mutex name shared by every allocation transaction. */
-const ALLOCATION_LOCK_NAME = 'exhibit-flow.allocation.v1';
+/** Cross-tab mutex shared by every write that can change owner or status. */
+const REVIEW_WRITE_LOCK_NAME = 'exhibit-flow.review-write.v1';
 
 interface LockManagerLike {
   request(name: string, callback: () => Promise<void> | void): Promise<void>;
@@ -56,16 +57,91 @@ function getLockManager(): LockManagerLike | null {
   return typeof locks?.request === 'function' ? locks : null;
 }
 
+type LockedOutcome =
+  | { kind: 'applied'; audit?: AssignmentAuditEntry[] }
+  | { kind: 'unchanged' }
+  | { kind: 'duplicate'; message: string }
+  | { kind: 'conflicts'; conflicts: AllocationConflict[]; message: string }
+  | { kind: 'rejected'; message: string };
+
+interface QueueEntry {
+  mutate: (state: WorkspaceState) => { state: WorkspaceState; outcome: LockedOutcome };
+  resolve: (outcome: LockedOutcome) => void;
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
   const stateRef = useRef(state);
   stateRef.current = state;
   const appliedPlansRef = useRef<Set<string>>(new Set());
-  // State adopted from a direct transaction write or an external tab; the next
+  // State adopted from a direct locked write or an external tab; the next
   // persistence effect must skip it so we never echo authoritative storage
   // content back and clobber a peer.
   const adoptedStateRef = useRef<WorkspaceState | null>(null);
+
+  // Serialized cross-tab write queue. Every command that can change an
+  // issue's owner or status funnels through here: all queued mutations drain
+  // in one Web Lock-held task, each applied to the freshest state re-read from
+  // shared storage, then stamped once, written once, and adopted.
+  const queueRef = useRef<QueueEntry[]>([]);
+  const drainingRef = useRef(false);
+
+  const drainQueue = useCallback(() => {
+    if (drainingRef.current) return;
+    drainingRef.current = true;
+
+    const run = () => {
+      const entries = queueRef.current;
+      queueRef.current = [];
+      // Start from the shared state re-read under the lock; every queued
+      // mutation folds into the same base, so same-tab and cross-tab commands
+      // can never overwrite one another.
+      let base = loadStoredWorkspace() ?? stateRef.current;
+      let changed = false;
+
+      for (const entry of entries) {
+        try {
+          const { state: next, outcome } = entry.mutate(base);
+          entry.resolve(outcome);
+          if (outcome.kind === 'applied' && next !== base) {
+            base = next;
+            changed = true;
+          }
+        } catch (error) {
+          entry.resolve({ kind: 'rejected', message: error instanceof Error ? error.message : 'The transaction failed.' });
+        }
+      }
+
+      let saved = true;
+      if (changed) {
+        const stamped: WorkspaceState = { ...base, lastSavedAt: new Date().toISOString() };
+        saved = saveWorkspace(stamped);
+        if (saved) {
+          adoptedStateRef.current = stamped;
+          dispatch({ type: 'transaction/apply', state: stamped });
+        } else {
+          setStorageHealthy(false);
+        }
+      }
+      drainingRef.current = false;
+      if (queueRef.current.length > 0) drainQueue();
+    };
+
+    const locks = getLockManager();
+    if (locks) {
+      locks.request(REVIEW_WRITE_LOCK_NAME, () => { run(); }).catch(() => run());
+    } else {
+      run();
+    }
+  }, []);
+
+  const enqueueLocked = useCallback((mutate: QueueEntry['mutate']): Promise<LockedOutcome> => {
+    return new Promise<LockedOutcome>((resolve) => {
+      queueRef.current.push({ mutate, resolve });
+      drainQueue();
+    });
+  }, [drainQueue]);
 
   useEffect(() => {
     if (adoptedStateRef.current === state) {
@@ -76,8 +152,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
 
-  // Adopt writes committed in another tab. Allocation transactions also
-  // serialize on a named lock and re-read storage before writing.
+  // Adopt writes committed in another tab. Local review writes serialize on
+  // the same named lock, so by the time an event arrives it is authoritative.
   useEffect(() => {
     const onExternalChange = (event: StorageEvent) => {
       if (event.key !== STORAGE_KEY || !event.newValue) return;
@@ -85,8 +161,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       try { incoming = parseWorkspaceJson(event.newValue); } catch { incoming = null; }
       if (!incoming) return;
       if (incoming.lastSavedAt === stateRef.current.lastSavedAt) return;
-      // Merge any audit entries missing locally before handing state to the
-      // reducer so the complete trail survives either side winning.
+      // Merge any audit entries missing locally before adopting so the
+      // complete trail survives whichever side committed last.
       const known = new Set(stateRef.current.assignmentLog.map((entry) => entry.id));
       const mergedAudit = [
         ...stateRef.current.assignmentLog,
@@ -143,40 +219,59 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const addIssue = useCallback((draft: IssueDraft): CommandResult => {
+  const addIssue = useCallback(async (draft: IssueDraft): Promise<CommandResult> => {
     if (!draft.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
     if (draft.description.trim().length < 16) return { ok: false, errors: { description: 'Add at least 16 characters of context.' } };
     if (!draft.owner.trim()) return { ok: false, errors: { owner: 'Assign an owner.' } };
-    const now = new Date().toISOString();
-    dispatch({
-      type: 'issue/add',
-      issue: {
-        id: createId('issue'),
-        title: draft.title.trim(),
-        description: draft.description.trim(),
-        severity: draft.severity,
-        status: 'open',
-        owner: draft.owner.trim(),
-        zoneId: draft.zoneId || undefined,
-        artifactId: draft.artifactId || undefined,
-        version: 0,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
-    return { ok: true };
-  }, []);
 
-  const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
-    const issue = state.issues.find((candidate) => candidate.id === issueId);
-    if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
-    try {
-      dispatch({ type: 'issue/transition', issueId, status });
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
-    }
-  }, [state.issues]);
+    // Build the issue outside the lock but validate/persist inside it so the
+    // new finding shares the same cross-tab write serialization.
+    const now = new Date().toISOString();
+    const issue: ReviewIssue = {
+      id: createId('issue'),
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      severity: draft.severity,
+      status: 'open',
+      owner: draft.owner.trim(),
+      zoneId: draft.zoneId || undefined,
+      artifactId: draft.artifactId || undefined,
+      version: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const outcome = await enqueueLocked((current) => ({
+      state: regressReadyProject({ ...current, issues: [issue, ...current.issues] }),
+      outcome: { kind: 'applied' },
+    }));
+    return outcome.kind === 'rejected'
+      ? { ok: false, message: outcome.message }
+      : { ok: true };
+  }, [enqueueLocked]);
+
+  const transitionReviewIssue = useCallback(async (issueId: string, status: IssueStatus): Promise<CommandResult> => {
+    const previewIssue = stateRef.current.issues.find((candidate) => candidate.id === issueId);
+    if (!previewIssue) return { ok: false, message: 'The selected review finding no longer exists.' };
+
+    const outcome = await enqueueLocked((current) => {
+      const issue = current.issues.find((candidate) => candidate.id === issueId);
+      if (!issue) {
+        return { state: current, outcome: { kind: 'rejected', message: 'The selected review finding no longer exists.' } };
+      }
+      // Re-read under the lock: an allocation or peer transition may have
+      // moved the version. transitionIssue validates the lifecycle and bumps
+      // only when the status actually changes.
+      if (issue.status === status) return { state: current, outcome: { kind: 'unchanged' } };
+      const moved = transitionIssue(issue, status);
+      const nextIssue: ReviewIssue = { ...moved, version: issue.version + 1 };
+      return {
+        state: regressReadyProject({ ...current, issues: current.issues.map((candidate) => candidate.id === issueId ? nextIssue : candidate) }),
+        outcome: { kind: 'applied' },
+      };
+    });
+    if (outcome.kind === 'rejected') return { ok: false, message: outcome.message };
+    return { ok: true };
+  }, [enqueueLocked]);
 
   const commitAllocationPlan = useCallback(async (plan: AllocationPlan): Promise<AllocationCommandResult> => {
     // Synchronous guard so a double click in the same UI task reports a
@@ -185,65 +280,47 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return { ok: true, duplicate: true, audit: [], message: 'This allocation was already applied.' };
     }
 
-    const runTransaction = (): AllocationCommandResult => {
-      // Re-read shared state straight from storage under the lock: another tab
-      // may have committed after this dialog opened. Fall back to in-memory
-      // state when nothing is persisted yet (first run) or storage is unreadable.
-      const shared = loadStoredWorkspace() ?? stateRef.current;
+    const outcome = await enqueueLocked((shared) => {
+      // Re-read happens in the drain; `shared` is already the freshest state
+      // in shared storage for this lock-held task.
       const result = commitAllocation(shared, plan);
-
       if (!result.ok) {
         return {
-          ok: false,
-          conflicts: result.conflicts,
-          message: 'The workload changed while the batch was open. Review the conflicts and refresh.',
+          state: shared,
+          outcome: {
+            kind: 'conflicts',
+            conflicts: result.conflicts,
+            message: 'The workload changed while the batch was open. Review the conflicts and refresh.',
+          },
         };
       }
       if (result.duplicate) {
         appliedPlansRef.current.add(plan.planId);
-        return { ok: true, duplicate: true, audit: [], message: 'This allocation was already applied.' };
+        return { state: shared, outcome: { kind: 'duplicate', message: 'This allocation was already applied.' } };
       }
       if (result.audit.length === 0) {
-        return { ok: true, audit: [], duplicate: false };
-      }
-
-      // read → validate → write all run in one synchronous lock-held task, so
-      // no other tab (allocation commits hold the same lock; other writes are
-      // blocked from interleaving by the event loop) can slip in between.
-      const committed: WorkspaceState = {
-        ...result.state,
-        lastSavedAt: new Date().toISOString(),
-      };
-      if (!saveWorkspace(committed)) {
-        return { ok: false, message: 'The allocation could not be saved to this browser.' };
+        return { state: shared, outcome: { kind: 'unchanged' } };
       }
       appliedPlansRef.current.add(plan.planId);
       if (appliedPlansRef.current.size > 20) {
         appliedPlansRef.current = new Set([...appliedPlansRef.current].slice(-10));
       }
-      // Adopt the authoritative committed state without a second storage
-      // write; the persistence effect skips this exact reference.
-      adoptedStateRef.current = committed;
-      dispatch({ type: 'allocation/committed', state: committed, movedCount: result.audit.length, duplicate: false });
-      return { ok: true, audit: result.audit };
-    };
+      return { state: result.state, outcome: { kind: 'applied', audit: result.audit } };
+    });
 
-    const locks = getLockManager();
-    if (locks) {
-      // Named Web Lock: allocation commits in every tab are mutually exclusive.
-      try {
-        let outcome: AllocationCommandResult = { ok: false, message: 'Allocation transaction failed.' };
-        await locks.request(ALLOCATION_LOCK_NAME, async () => {
-          outcome = runTransaction();
-        });
-        return outcome;
-      } catch {
-        // A lock failure must never silently apply; fall through to a direct
-        // best-effort transaction where version checks still reject drift.
-      }
+    switch (outcome.kind) {
+      case 'conflicts':
+        return { ok: false, conflicts: outcome.conflicts, message: outcome.message };
+      case 'duplicate':
+        return { ok: true, duplicate: true, audit: [], message: outcome.message };
+      case 'rejected':
+        return { ok: false, message: outcome.message };
+      case 'unchanged':
+        return { ok: true, audit: [], duplicate: false };
+      case 'applied':
+        return { ok: true, audit: outcome.audit ?? [] };
     }
-    return runTransaction();
-  }, []);
+  }, [enqueueLocked]);
 
   const updatePreferences = useCallback((preferences: PlanningPreferences) => {
     dispatch({ type: 'preferences/update', preferences });
