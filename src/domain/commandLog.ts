@@ -12,6 +12,7 @@ export function describeAction(action: WorkspaceAction): string {
   switch (action.type) {
     case 'artifact/upsert': return `Saved object ${action.artifact.accessionId}`;
     case 'artifact/remove': return `Removed object ${action.artifactId}`;
+    case 'artifact/batchCommit': return `Committed batch transaction ${action.record.id} across ${action.record.itemCount} objects`;
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;

@@ -69,6 +69,23 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
       }));
     }
+    case 'artifact/batchCommit': {
+      // Idempotent guard: a retried transaction must never be recorded twice.
+      if (state.batchTransactions.some((record) => record.id === action.record.id)) {
+        return state;
+      }
+      const applied = new Set(action.record.artifactIds);
+      const nextArtifacts = state.artifacts.map((artifact) =>
+        applied.has(artifact.id)
+          ? action.artifacts.find((updated) => updated.id === artifact.id) ?? artifact
+          : artifact,
+      );
+      return stamp(regressReadyProject({
+        ...state,
+        artifacts: nextArtifacts,
+        batchTransactions: [...state.batchTransactions, action.record],
+      }));
+    }
     case 'placement/assign':
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
     case 'placement/remove':

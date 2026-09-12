@@ -77,6 +77,16 @@ export interface ExhibitProject {
   lastReadinessCheck?: string;
 }
 
+export interface BatchTransactionRecord {
+  id: string;
+  createdAt: string;
+  committedAt: string;
+  itemCount: number;
+  artifactIds: string[];
+  fields: string[];
+  appliedRevision: string;
+}
+
 export interface WorkspaceState {
   version: 1;
   project: ExhibitProject;
@@ -84,6 +94,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  batchTransactions: BatchTransactionRecord[];
   lastSavedAt?: string;
 }
 
