@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { applyPlacementRemoval, evaluateRestore } from '../domain/placementRecovery';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -72,7 +73,16 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'placement/assign':
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
     case 'placement/remove':
-      return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
+      return stamp(regressReadyProject(applyPlacementRemoval(state, action.removal)));
+    case 'placement/restore': {
+      const { next } = evaluateRestore(state, action.removalId, action.at ? new Date(action.at) : undefined, { approved: action.approved });
+      return stamp(regressReadyProject(next));
+    }
+    case 'placement/removal-discard':
+      return stamp({
+        ...state,
+        removals: state.removals.filter((removal) => removal.id !== action.removalId),
+      });
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
     case 'issue/add':
@@ -95,6 +105,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'snapshot/published':
+      return stamp({ ...state, publications: [action.publication, ...state.publications] });
     case 'workspace/reset':
       return action.state;
     default:

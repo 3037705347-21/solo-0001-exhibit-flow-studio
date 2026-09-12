@@ -270,6 +270,8 @@ export function createSeedWorkspace(): WorkspaceState {
       accessibilityPriority: 70,
       groupSize: 6,
     },
+    removals: [],
+    publications: [],
     lastSavedAt: '2026-09-01T14:30:00.000Z',
   };
 }

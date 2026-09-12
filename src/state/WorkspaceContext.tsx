@@ -2,8 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { createPlacementRemoval, evaluateRestore, planPlacementRemoval, type RestoreOutcome } from '../domain/placementRecovery';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import { snapshotFileName } from '../domain/export';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, RemovalPlan, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -21,7 +23,10 @@ interface WorkspaceContextValue {
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
-  removePlacement: (artifactId: string) => void;
+  planPlacementRemoval: (artifactId: string) => RemovalPlan | null;
+  removePlacement: (artifactId: string) => CommandResult;
+  restorePlacement: (removalId: string, options?: { approved?: boolean }) => CommandResult<RestoreOutcome>;
+  discardRemoval: (removalId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
@@ -71,8 +76,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const removePlacement = useCallback((artifactId: string) => {
-    dispatch({ type: 'placement/remove', artifactId });
+  const planPlacementRemovalCommand = useCallback((artifactId: string): RemovalPlan | null => {
+    return planPlacementRemoval(state, artifactId);
+  }, [state]);
+
+  const removePlacement = useCallback((artifactId: string): CommandResult => {
+    const removal = createPlacementRemoval(state, artifactId, createId('removal'));
+    if (!removal) return { ok: false, message: 'Only a placed object can be removed from the journey.' };
+    dispatch({ type: 'placement/remove', removal });
+    return { ok: true };
+  }, [state]);
+
+  const restorePlacement = useCallback((removalId: string, options?: { approved?: boolean }): CommandResult<RestoreOutcome> => {
+    // Re-evaluate against the current state so the returned message matches
+    // the transition the reducer produces for the same input.
+    const { outcome } = evaluateRestore(state, removalId, undefined, { approved: options?.approved });
+    dispatch({ type: 'placement/restore', removalId, approved: options?.approved });
+    if (outcome.kind === 'review') return { ok: false, value: outcome, message: outcome.detail };
+    if (outcome.kind === 'noop') return { ok: false, value: outcome, message: outcome.detail };
+    return { ok: true, value: outcome, message: outcome.detail };
+  }, [state]);
+
+  const discardRemoval = useCallback((removalId: string) => {
+    dispatch({ type: 'placement/removal-discard', removalId });
   }, []);
 
   const reorderArtifact = useCallback((zoneId: string, artifactId: string, direction: -1 | 1): CommandResult => {
@@ -133,7 +159,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const readiness = evaluateReadiness(state, analysis);
     if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
-    return { ok: true, value: buildSnapshot(state, analysis, readiness) };
+    const snapshot = buildSnapshot(state, analysis, readiness);
+    // Record the frozen release so later placement recovery can detect the
+    // export dependency; the stored record is never rewritten by recovery.
+    dispatch({
+      type: 'snapshot/published',
+      publication: {
+        generatedAt: snapshot.generatedAt,
+        fileName: snapshotFileName(new Date(snapshot.generatedAt)),
+        readinessScore: snapshot.summary.readinessScore,
+        zoneIds: snapshot.zones.map((zone) => zone.id),
+        artifactIds: snapshot.zones.flatMap((zone) => zone.artifacts.map((artifact) => artifact.id)),
+      },
+    });
+    return { ok: true, value: snapshot };
   }, [state]);
 
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
@@ -144,7 +183,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     upsertArtifact,
     removeArtifact,
     assignArtifact,
+    planPlacementRemoval: planPlacementRemovalCommand,
     removePlacement,
+    restorePlacement,
+    discardRemoval,
     reorderArtifact,
     addIssue,
     transitionReviewIssue,
@@ -152,7 +194,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, planPlacementRemovalCommand, removePlacement, restorePlacement, discardRemoval, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -21,6 +21,8 @@ interface LegacyWorkspace {
   zones?: LegacyZone[];
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
+  removals?: WorkspaceState['removals'];
+  publications?: WorkspaceState['publications'];
   lastSavedAt?: string;
 }
 
@@ -39,6 +41,8 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     zones,
     issues: source.issues,
     preferences: source.preferences,
+    removals: Array.isArray(source.removals) ? source.removals : [],
+    publications: Array.isArray(source.publications) ? source.publications : [],
     lastSavedAt: source.lastSavedAt,
   };
 }

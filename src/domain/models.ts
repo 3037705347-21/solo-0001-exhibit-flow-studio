@@ -84,6 +84,10 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  /** Recoverable placement removal transactions, newest first. */
+  removals: PlacementRemoval[];
+  /** Frozen export records; recovery never mutates or deletes these. */
+  publications: SnapshotPublication[];
   lastSavedAt?: string;
 }
 
@@ -187,4 +191,75 @@ export interface Snapshot {
   };
   zones: Array<Zone & { artifacts: Artifact[] }>;
   unresolvedIssues: ReviewIssue[];
+}
+
+export type PlacementRemovalStatus = 'held' | 'restored' | 'in-review';
+export type RestoreConflictReason =
+  | 'not-held'
+  | 'object-missing'
+  | 'zone-missing'
+  | 'object-modified'
+  | 'already-placed'
+  | 'position-ambiguous'
+  | 'constraint-violation'
+  | 'export-dependency-stale';
+
+export interface RelatedFindingRef {
+  issueId: string;
+  title: string;
+  severity: IssueSeverity;
+  status: IssueStatus;
+}
+
+export interface ExportDependencyRef {
+  snapshotGeneratedAt: string;
+  readinessScore: number;
+  includesObject: boolean;
+}
+
+/**
+ * A recoverable record of removing an artifact placement from the journey.
+ * The record captures enough context (source zone, index, neighboring objects,
+ * linked findings, export dependencies, version stamps) to restore the
+ * placement deterministically or route the case to manual review.
+ */
+export interface PlacementRemoval {
+  id: string;
+  artifactId: string;
+  artifactVersion: string;
+  zoneId: string;
+  zoneVersion: string;
+  index: number;
+  neighborBeforeId: string | null;
+  neighborAfterId: string | null;
+  zoneOrderAfterRemoval: string[];
+  relatedFindings: RelatedFindingRef[];
+  exportDependencies: ExportDependencyRef[];
+  status: PlacementRemovalStatus;
+  createdAt: string;
+  restoredAt?: string;
+  conflictReason?: RestoreConflictReason;
+  conflictDetail?: string;
+  reviewAttempts: number;
+}
+
+/** A frozen release artifact produced from the workspace; never rewritten by recovery. */
+export interface SnapshotPublication {
+  generatedAt: string;
+  fileName: string;
+  readinessScore: number;
+  zoneIds: string[];
+  artifactIds: string[];
+}
+
+export interface RemovalPlan {
+  artifactId: string;
+  artifactTitle: string;
+  zoneId: string;
+  zoneName: string;
+  index: number;
+  neighborBeforeTitle: string | null;
+  neighborAfterTitle: string | null;
+  relatedFindings: RelatedFindingRef[];
+  exportDependencies: ExportDependencyRef[];
 }

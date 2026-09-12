@@ -13,12 +13,15 @@ export function describeAction(action: WorkspaceAction): string {
     case 'artifact/upsert': return `Saved object ${action.artifact.accessionId}`;
     case 'artifact/remove': return `Removed object ${action.artifactId}`;
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
-    case 'placement/remove': return `Removed object from journey`;
+    case 'placement/remove': return `Removed ${action.removal.artifactId} from journey (recoverable)`;
+    case 'placement/restore': return `Restored a placement into the journey`;
+    case 'placement/removal-discard': return `Discarded a placement removal record`;
     case 'placement/reorder': return `Changed object sequence`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'snapshot/published': return `Published snapshot ${action.publication.fileName}`;
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }
