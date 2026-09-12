@@ -62,6 +62,70 @@ describe('repair command boundary', () => {
     expect(computePlanRevision(result.current.state)).toBe(computePlanRevision(applied));
   });
 
+  it('applies a second, different proposal for remaining conflicts after the first repair', () => {
+    // Regression: the first successful repair must not poison later repairs.
+    // Only an identical revision+operations confirmation is a duplicate.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(overloadedPlan()));
+    const { result } = renderWorkspace();
+
+    // First repair: select just the capacity error and apply it.
+    const first = proposalFor(result.current.state);
+    let response: { ok: boolean; message?: string } = { ok: false };
+    act(() => { response = result.current.applyRepairProposal(first.changes.map((change) => change.operation), first.revision); });
+    expect(response.ok).toBe(true);
+    const afterFirst = result.current.state;
+    expect(computePlanRevision(afterFirst)).not.toBe(first.revision);
+
+    // The repaired plan still carries a non-blocking capacity warning. Build a
+    // second proposal for the remaining conflicts against the new revision.
+    const remaining = extractRepairConflicts(afterFirst.artifacts, afterFirst.zones);
+    expect(remaining.length).toBeGreaterThan(0);
+    const second = buildRepairProposal({
+      state: afterFirst,
+      selectedConflictIds: remaining.map((conflict) => conflict.id),
+    });
+    expect(second.revision).toBe(computePlanRevision(afterFirst));
+    expect(JSON.stringify(second.changes.map((change) => change.operation)))
+      .not.toBe(JSON.stringify(first.changes.map((change) => change.operation)));
+
+    act(() => {
+      response = result.current.applyRepairProposal(second.changes.map((change) => change.operation), second.revision);
+    });
+    // The second proposal is a fresh confirmation, not a duplicate.
+    expect(response.ok).toBe(true);
+    expect(response.message).toBeUndefined();
+  });
+
+  it('still rejects an identical duplicate of the second proposal once applied', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(overloadedPlan()));
+    const { result } = renderWorkspace();
+
+    const first = proposalFor(result.current.state);
+    act(() => { result.current.applyRepairProposal(first.changes.map((change) => change.operation), first.revision); });
+
+    const remaining = extractRepairConflicts(result.current.state.artifacts, result.current.state.zones);
+    const second = buildRepairProposal({
+      state: result.current.state,
+      selectedConflictIds: remaining.map((conflict) => conflict.id),
+    });
+    const secondOperations = second.changes.map((change) => change.operation);
+    act(() => { result.current.applyRepairProposal(secondOperations, second.revision); });
+
+    const revisionAfterSecond = computePlanRevision(result.current.state);
+    const arrivalAfterSecond = [...result.current.state.zones.find((zone) => zone.id === 'zone-arrival')!.artifactIds];
+
+    // Re-confirming the exact same second proposal (same revision + operations)
+    // is rejected even though that revision has already moved on.
+    let duplicate: { ok: boolean; message?: string } = { ok: true };
+    act(() => {
+      duplicate = result.current.applyRepairProposal(secondOperations, second.revision);
+    });
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.message).toMatch(/already applied|recalculated/i);
+    expect(computePlanRevision(result.current.state)).toBe(revisionAfterSecond);
+    expect(result.current.state.zones.find((zone) => zone.id === 'zone-arrival')!.artifactIds).toEqual(arrivalAfterSecond);
+  });
+
   it('abandons a stale proposal when a placement changed, then succeeds after recalculation', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(overloadedPlan()));
     const { result } = renderWorkspace();

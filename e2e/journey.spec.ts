@@ -124,4 +124,37 @@ test.describe('constraint repair sandbox', () => {
     await page.getByRole('button', { name: /^Cancel$/ }).click();
     await expect(page.getByText(/requires low light/).first()).toBeVisible();
   });
+
+  test('applies a second proposal for remaining conflicts after the first repair', async ({ page }) => {
+    await page.goto('/journey');
+
+    // Overload arrival with radio + bowl: first repair clears the blocking
+    // error but leaves a non-blocking capacity warning as a remaining conflict.
+    await relocate(page, 'Kitchen Table Radio');
+    await relocate(page, 'Mended Serving Bowl');
+
+    // First repair: only the blocking capacity error is selected by default.
+    await openSandbox(page);
+    await page.getByRole('button', { name: /Calculate minimal changes/ }).click();
+    const firstApply = page.getByRole('button', { name: /Apply 1 change to plan/ });
+    await expect(firstApply).toBeEnabled();
+    await firstApply.click();
+    await expect(page.getByText(/Applied 1 repair change/)).toBeVisible();
+
+    // A remaining warning is still listed, so the sandbox stays available.
+    await expect(page.getByTestId('open-repair-sandbox')).toBeEnabled();
+
+    // Second repair for the remaining conflict must not be mistaken for a
+    // duplicate of the first confirmation.
+    await openSandbox(page);
+    const warningCheckbox = page.getByRole('checkbox').first();
+    await warningCheckbox.check();
+    await page.getByRole('button', { name: /Calculate minimal changes/ }).click();
+    const secondApply = page.getByRole('button', { name: /Apply \d+ changes? to plan/ });
+    await expect(secondApply).toBeEnabled();
+    await secondApply.click();
+    // Success, not an "already applied" rejection.
+    await expect(page.getByText(/Applied \d+ repair change/)).toBeVisible();
+    await expect(page.getByTestId('sandbox-error-banner')).toHaveCount(0);
+  });
 });

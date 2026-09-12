@@ -2,8 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
-import { computePlanRevision } from '../domain/planVersion';
-import { commitRepairOperations, RepairCommitError, type RepairOperation } from '../domain/repairSandbox';
+import { commitRepairOperations, repairCommitSignature, RepairCommitError, type RepairOperation } from '../domain/repairSandbox';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
@@ -44,10 +43,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // current at confirm time, rather than the render the command was created on.
   const stateRef = useRef(state);
   stateRef.current = state;
-  const appliedRepairRevision = useRef<string | null>(null);
-  // Last proposal signature handed to the reducer. A second click on the same
-  // proposal (before React re-renders with the new revision) is rejected here.
-  const pendingRepairSignature = useRef<string | null>(null);
+  // Signature (revision + ordered operations) of the exact proposal already
+  // confirmed. Only an identical confirmation is treated as a duplicate; a
+  // second proposal that simply targets the same current revision is allowed.
+  const lastRepairSignature = useRef<string | null>(null);
 
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
@@ -98,23 +97,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const applyRepairProposal = useCallback((operations: RepairOperation[], expectedRevision: string): CommandResult => {
     const current = stateRef.current;
-    const signature = `${expectedRevision}:${JSON.stringify(operations)}`;
-    if (pendingRepairSignature.current === signature) {
+    const signature = repairCommitSignature(operations, expectedRevision);
+    if (lastRepairSignature.current === signature) {
       return { ok: false, message: 'This repair proposal was already applied.' };
     }
     try {
       // Validate and dry-run the whole set against the current revision before
-      // dispatching anything. Stale proposals, duplicate confirms and failed
-      // simulations return here without touching the plan.
-      const next = commitRepairOperations({
+      // dispatching anything. Stale proposals, identical duplicate confirms
+      // and failed simulations return here without touching the plan.
+      commitRepairOperations({
         state: current,
         operations,
         expectedRevision,
-        appliedRevision: appliedRepairRevision.current,
+        appliedSignature: lastRepairSignature.current,
       });
-      pendingRepairSignature.current = signature;
+      // Record the exact confirmed signature before dispatching so a second
+      // click in the same tick (no re-render between them) is also blocked.
+      lastRepairSignature.current = signature;
       dispatch({ type: 'repair/commit', operations, expectedRevision });
-      appliedRepairRevision.current = computePlanRevision(next);
       return { ok: true };
     } catch (error) {
       if (error instanceof RepairCommitError) {

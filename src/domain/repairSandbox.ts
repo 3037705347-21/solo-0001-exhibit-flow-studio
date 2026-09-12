@@ -49,6 +49,7 @@ export type BlockedReasonCode =
   | 'no-seating-zone'
   | 'every-zone-full'
   | 'would-overload-target'
+  | 'would-create-conflict'
   | 'last-role-carrier'
   | 'no-candidate-object';
 
@@ -183,6 +184,7 @@ interface ScoredCandidate {
   cost: number[];
   resolves: Set<string>;
   newWarningIds: string[];
+  newErrorIds: string[];
   blocked?: BlockedCondition;
 }
 
@@ -238,13 +240,35 @@ function scoreCandidate(
   selectedIds: Set<string>,
 ): ScoredCandidate {
   const simulated = applyOperation(state, operation);
-  const beforeIds = new Set(analyzeJourney(state.artifacts, state.zones).findings.map((finding) => finding.id));
+  const beforeAnalysis = analyzeJourney(state.artifacts, state.zones);
+  const beforeIds = new Set(beforeAnalysis.findings.map((finding) => finding.id));
   const afterAnalysis = analyzeJourney(simulated.artifacts, simulated.zones);
-  const afterIds = new Set(afterAnalysis.findings.map((finding) => finding.id));
+  const newErrorFindings = afterAnalysis.findings.filter((finding) => finding.type === 'error' && !beforeIds.has(finding.id));
   const newWarningIds = afterAnalysis.findings
     .filter((finding) => finding.type === 'warning' && !beforeIds.has(finding.id))
     .map((finding) => finding.id);
+  const newErrorIds = newErrorFindings.map((finding) => finding.id);
+  const afterIds = new Set(afterAnalysis.findings.map((finding) => finding.id));
   const resolves = new Set([...selectedIds].filter((id) => !afterIds.has(id)));
+
+  // A candidate that trades the selected conflict for a fresh blocking error is
+  // never viable, regardless of how well it resolves the targeted conflict.
+  if (newErrorIds.length > 0) {
+    const names = newErrorFindings.map((finding) => finding.title).join('; ');
+    return {
+      operation,
+      cost: [9, 0, 0, 0, 0],
+      resolves,
+      newWarningIds,
+      newErrorIds,
+      blocked: {
+        code: 'would-create-conflict',
+        artifactId: operation.artifactId,
+        zoneId: operation.zoneId,
+        message: `This move introduces a blocking constraint: ${names}.`,
+      },
+    };
+  }
 
   const fromZone = zoneOfArtifact(state, operation.artifactId);
   const objectIndex = fromZone ? fromZone.artifactIds.indexOf(operation.artifactId) : 0;
@@ -254,7 +278,7 @@ function scoreCandidate(
 
   // Deterministic ordering:
   // 1. must resolve the conflict it was generated for
-  // 2. never trade the selected conflict for a fresh warning/error elsewhere
+  // 2. never trade the selected conflict for a fresh warning elsewhere
   // 3. resolve as many of the selected conflicts as possible
   // 4. prefer moves/places over returning objects to the queue
   // 5. prefer earlier objects in their zone, then earlier destination zones
@@ -266,7 +290,7 @@ function scoreCandidate(
     objectIndex,
     targetSequence,
   ];
-  return { operation, cost, resolves, newWarningIds };
+  return { operation, cost, resolves, newWarningIds, newErrorIds };
 }
 
 /** Every viable move/unplace candidate for a placed object, plus blocked reasons. */
@@ -282,7 +306,7 @@ function placedObjectCandidates(
       operation: { kind: 'move', artifactId: artifact.id },
       cost: [9, 0, 0, 0, 0],
       resolves: new Set(),
-      newWarningIds: [],
+      newWarningIds: [], newErrorIds: [],
       blocked: {
         code: 'key-object-protected',
         artifactId: artifact.id,
@@ -299,7 +323,7 @@ function placedObjectCandidates(
         operation: { kind: 'move', artifactId: artifact.id, zoneId: target.id },
         cost: [9, 0, 0, 0, 0],
         resolves: new Set(),
-        newWarningIds: [],
+        newWarningIds: [], newErrorIds: [],
         blocked,
       });
     } else {
@@ -311,7 +335,7 @@ function placedObjectCandidates(
       operation: { kind: 'unplace', artifactId: artifact.id },
       cost: [9, 0, 0, 0, 0],
       resolves: new Set(),
-      newWarningIds: [],
+      newWarningIds: [], newErrorIds: [],
       blocked: {
         code: 'last-role-carrier',
         artifactId: artifact.id,
@@ -346,7 +370,7 @@ function queueCandidates(
           artifactId: artifact.id,
           message: `No destination zone is available for ${artifact.title}.`,
         };
-    return [{ operation: { kind: 'place', artifactId: artifact.id }, cost: [9, 0, 0, 0, 0], resolves: new Set(), newWarningIds: [], blocked }];
+    return [{ operation: { kind: 'place', artifactId: artifact.id }, cost: [9, 0, 0, 0, 0], resolves: new Set(), newWarningIds: [], newErrorIds: [], blocked }];
   }
   return targets.map((target) => scoreCandidate(state, conflict, { kind: 'place', artifactId: artifact.id, zoneId: target.id }, selectedIds));
 }
@@ -380,7 +404,7 @@ function candidatesForConflict(state: WorkingState, conflict: RepairConflict, se
       operation: { kind: 'place', artifactId: '' },
       cost: [9, 0, 0, 0, 0],
       resolves: new Set(),
-      newWarningIds: [],
+      newWarningIds: [], newErrorIds: [],
       blocked: {
         code: 'no-candidate-object',
         message: `No ${role?.replace('-', ' ')} object exists in the collection; add one or change an object's narrative role.`,
@@ -440,7 +464,11 @@ export function buildRepairProposal({ state, selectedConflictIds, revision }: Bu
       pool.push(...candidatesForConflict(working, conflict, selectedIds));
     }
     const viable = pool
+      // Static incompatibility (light, seating, capacity, key-object, …)
       .filter((candidate) => !candidate.blocked)
+      // Structural guarantee: a single step may not introduce a fresh blocking
+      // error anywhere (even while resolving the conflict it was scored for).
+      .filter((candidate) => candidate.newErrorIds.length === 0)
       .filter((candidate) => !chosen.some((entry) => sameOperation(entry.candidate.operation, candidate.operation)))
       .sort(compareCost);
     const winner = viable[0];
@@ -454,10 +482,36 @@ export function buildRepairProposal({ state, selectedConflictIds, revision }: Bu
     chosen.push({ candidate: winner, conflict, workingAfter: working });
   }
 
-  // Final verification: every selected conflict gone, no fresh blocking errors.
+  // Final verification: replay the chosen steps against the original plan.
+  // Every selected conflict must be gone and no step may introduce a fresh
+  // blocking error. The first offending step invalidates itself and everything
+  // after it, so a proposal can never contain a blocking change.
   const initialAnalysis = analyzeJourney(state.artifacts, state.zones);
   const initialIds = new Set(initialAnalysis.findings.map((finding) => finding.id));
-  const finalAnalysis = analyzeJourney(working.artifacts, working.zones);
+  const initialErrorIds = new Set(initialAnalysis.findings.filter((finding) => finding.type === 'error').map((finding) => finding.id));
+  let replay: WorkingState = { artifacts: state.artifacts, zones: state.zones };
+  const safeSteps: ChosenStep[] = [];
+  for (const step of chosen) {
+    const next = applyOperation(replay, step.candidate.operation);
+    const nextAnalysis = analyzeJourney(next.artifacts, next.zones);
+    const introducesError = nextAnalysis.findings.some(
+      (finding) => finding.type === 'error' && !initialErrorIds.has(finding.id),
+    );
+    if (introducesError) {
+      // This step (and any later one) cannot be part of the proposal.
+      const stillSelected = new Set(analyzeJourney(replay.artifacts, replay.zones).findings.map((finding) => finding.id));
+      for (const conflict of selected) {
+        if (stillSelected.has(conflict.id) && !unresolved.some((entry) => entry.id === conflict.id)) {
+          unresolved.push(conflict);
+        }
+      }
+      break;
+    }
+    replay = next;
+    safeSteps.push(step);
+  }
+
+  const finalAnalysis = analyzeJourney(replay.artifacts, replay.zones);
   const finalIds = new Set(finalAnalysis.findings.map((finding) => finding.id));
   for (const conflictId of selectedIds) {
     if (finalIds.has(conflictId) && !unresolved.some((conflict) => conflict.id === conflictId)) {
@@ -473,7 +527,7 @@ export function buildRepairProposal({ state, selectedConflictIds, revision }: Bu
     .filter((finding) => cautionIds.has(finding.id))
     .map((finding) => ({ id: finding.id, title: finding.title, detail: finding.detail }));
 
-  const changes: RepairChange[] = chosen.map((entry, index) =>
+  const changes: RepairChange[] = safeSteps.map((entry, index) =>
     describeChange(state, entry, selectedIds, index + 1),
   );
 
@@ -642,13 +696,23 @@ export interface CommitRepairInput {
   state: WorkspaceState;
   operations: RepairOperation[];
   expectedRevision: PlanRevision;
-  /** Revision already repaired in this session; rejects duplicate confirms. */
-  appliedRevision?: PlanRevision | null;
+  /**
+   * Signature of the exact proposal already confirmed in this session
+   * (revision + ordered operations). Only an identical confirmation is
+   * rejected; a fresh proposal that merely targets the same current revision
+   * (e.g. the remaining conflicts after a successful repair) is allowed.
+   */
+  appliedSignature?: string | null;
 }
 
-export function commitRepairOperations({ state, operations, expectedRevision, appliedRevision }: CommitRepairInput): WorkspaceState {
+export function repairCommitSignature(operations: RepairOperation[], expectedRevision: PlanRevision): string {
+  return `${expectedRevision}:${JSON.stringify(operations.map((operation) => [operation.kind, operation.artifactId, operation.zoneId ?? null]))}`;
+}
+
+export function commitRepairOperations({ state, operations, expectedRevision, appliedSignature }: CommitRepairInput): WorkspaceState {
   const currentRevision = computePlanRevision(state);
-  if (appliedRevision && appliedRevision === currentRevision && operations.length > 0) {
+  const signature = repairCommitSignature(operations, expectedRevision);
+  if (appliedSignature && appliedSignature === signature) {
     throw new RepairCommitError('already-applied', 'This repair proposal was already applied.');
   }
   if (currentRevision !== expectedRevision) {

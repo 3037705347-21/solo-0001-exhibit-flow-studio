@@ -6,6 +6,7 @@ import {
   buildRepairProposal,
   commitRepairOperations,
   extractRepairConflicts,
+  repairCommitSignature,
   RepairCommitError,
   type RepairOperation,
 } from './repairSandbox';
@@ -203,6 +204,67 @@ describe('repair proposal: key object protection', () => {
     expect(proposal.complete).toBe(true);
     expect(proposal.changes[0].operation).toMatchObject({ kind: 'place', artifactId: 'artifact-quilt', zoneId: 'zone-common' });
   });
+
+  it('never offers a change that resolves one conflict by introducing a blocking error', () => {
+    // Crafted plan: press is the ONLY turning-point object and is overloading
+    // arrival. Every other zone rejects moves on capacity/density, so the only
+    // single-object fix left is "return press to the queue" — but that creates
+    // the blocking missing-turning-point error. The proposal must exclude it.
+    const state = createSeedWorkspace();
+    for (const zone of state.zones) zone.artifactIds = [];
+    zoneById(state, 'zone-arrival').artifactIds = ['artifact-press']; // 7 > 10? no: shrink arrival budget via dwell
+    state.zones = state.zones.map((zone) => {
+      if (zone.id === 'zone-arrival') return { ...zone, capacityMinutes: 5 }; // press(7) overloads
+      // Every other zone is full on both capacity and object count.
+      return zone;
+    });
+    // Fill the three other zones so no move is statically possible.
+    zoneById(state, 'zone-patterns').artifactIds = ['artifact-sample-book', 'artifact-radio', 'artifact-tape', 'artifact-gloves'];
+    zoneById(state, 'zone-patterns').capacityMinutes = 14;
+    zoneById(state, 'zone-common').artifactIds = ['artifact-quilt'];
+    zoneById(state, 'zone-common').capacityMinutes = 8;
+    zoneById(state, 'zone-after').artifactIds = ['artifact-bowl'];
+    zoneById(state, 'zone-after').capacityMinutes = 4;
+
+    const conflicts = extractRepairConflicts(state.artifacts, state.zones);
+    const capacity = conflicts.find((conflict) => conflict.kind === 'capacity' && conflict.zoneId === 'zone-arrival');
+    expect(capacity).toBeDefined();
+
+    const proposal = buildRepairProposal({ state, selectedConflictIds: conflicts.map((conflict) => conflict.id) });
+
+    // Any proposed move must leave no NEW blocking errors relative to the
+    // original plan (it may resolve existing ones, but never introduce one).
+    const after = applyDirect(state, proposal.changes.map((change) => change.operation));
+    const beforeErrorIds = analyzeJourney(state.artifacts, state.zones).findings.filter((finding) => finding.type === 'error').map((finding) => finding.id);
+    const newErrors = analyzeJourney(after.artifacts, after.zones).findings
+      .filter((finding) => finding.type === 'error' && !beforeErrorIds.includes(finding.id));
+    expect(newErrors).toEqual([]);
+    // Returning the press to the queue (which would create a missing-role
+    // blocking error) is never part of the candidate set.
+    expect(proposal.changes.flatMap((change) => change.operation).find((op) => op.artifactId === 'artifact-press' && op.kind === 'unplace')).toBeUndefined();
+    // The conflict stays unresolved with an explicit unavailable option.
+    expect(proposal.unresolvedConflictIds).toContain(capacity!.id);
+    expect(proposal.complete).toBe(false);
+  });
+
+  it('guarantees no fresh blocking error even when a fix appears to relieve two conflicts at once', () => {
+    // Random-looking multi-conflict plan; assert the global invariant on every
+    // produced proposal: blocking-error ids after >= blocking-error ids before.
+    const state = createSeedWorkspace();
+    for (const zone of state.zones) zone.artifactIds = [];
+    zoneById(state, 'zone-arrival').artifactIds = ['artifact-press', 'artifact-lantern', 'artifact-quilt', 'artifact-sample-book'];
+    zoneById(state, 'zone-patterns').artifactIds = ['artifact-radio', 'artifact-tape', 'artifact-bowl', 'artifact-gloves'];
+
+    const conflicts = extractRepairConflicts(state.artifacts, state.zones);
+    expect(conflicts.length).toBeGreaterThan(1);
+    const proposal = buildRepairProposal({ state, selectedConflictIds: conflicts.map((conflict) => conflict.id) });
+
+    const after = applyDirect(state, proposal.changes.map((change) => change.operation));
+    const beforeErrors = new Set(analyzeJourney(state.artifacts, state.zones).findings.filter((finding) => finding.type === 'error').map((finding) => finding.id));
+    const newErrors = analyzeJourney(after.artifacts, after.zones).findings
+      .filter((finding) => finding.type === 'error' && !beforeErrors.has(finding.id));
+    expect(newErrors).toEqual([]);
+  });
 });
 
 describe('repair commit: versioning, failure and duplicate confirmation', () => {
@@ -271,21 +333,73 @@ describe('repair commit: versioning, failure and duplicate confirmation', () => 
     ).toThrow(/recalculated/);
   });
 
-  it('refuses a duplicate confirmation without changing the plan', () => {
+  it('refuses an identical duplicate confirmation without changing the plan', () => {
     const state = overloadedArrival();
     const revision = computePlanRevision(state);
     const capacity = extractRepairConflicts(state.artifacts, state.zones).find((conflict) => conflict.kind === 'capacity')!;
     const proposal = buildRepairProposal({ state, selectedConflictIds: [capacity.id] });
     const operations = proposal.changes.map((change) => change.operation);
+    const signature = repairCommitSignature(operations, revision);
 
-    const applied = commitRepairOperations({ state, operations, expectedRevision: revision });
-    const appliedRevision = computePlanRevision(applied);
+    // First confirmation is applied against the original revision.
+    commitRepairOperations({ state, operations, expectedRevision: revision });
 
-    // The same proposal confirmed again against the already-repaired revision.
+    // The exact same proposal (identical revision + ordered operation set)
+    // confirmed again is rejected, and the original plan is untouched.
     expect(() =>
-      commitRepairOperations({ state: applied, operations, expectedRevision: appliedRevision, appliedRevision }),
+      commitRepairOperations({ state, operations, expectedRevision: revision, appliedSignature: signature }),
     ).toThrow(/already applied/i);
-    expect(zoneById(applied, 'zone-arrival').artifactIds).not.toContain('artifact-tape');
+    expect(zoneById(state, 'zone-arrival').artifactIds).toContain('artifact-tape');
+  });
+
+  it('allows a fresh proposal against the repaired revision (only identical confirms are blocked)', () => {
+    // Regression: the first repair succeeds and leaves the plan at revision R1.
+    // A second proposal computed against R1 (for the remaining conflicts)
+    // must not be mistaken for a duplicate confirmation.
+    const state = overloadedArrival();
+    const revision = computePlanRevision(state);
+    const capacity = extractRepairConflicts(state.artifacts, state.zones).find((conflict) => conflict.kind === 'capacity')!;
+    const firstOperations = buildRepairProposal({ state, selectedConflictIds: [capacity.id] })
+      .changes.map((change) => change.operation);
+    const firstSignature = repairCommitSignature(firstOperations, revision);
+
+    const firstResult = commitRepairOperations({ state, operations: firstOperations, expectedRevision: revision });
+    const nextRevision = computePlanRevision(firstResult);
+
+    // After the repair, arrival still carries an 80% capacity warning. A second,
+    // different proposal computed against the repaired revision (for that
+    // remaining conflict) must not be mistaken for a duplicate confirmation.
+    const remainingConflicts = extractRepairConflicts(firstResult.artifacts, firstResult.zones);
+    const secondOperations = buildRepairProposal({
+      state: firstResult,
+      selectedConflictIds: remainingConflicts.map((conflict) => conflict.id),
+    }).changes.map((change) => change.operation);
+
+    expect(() =>
+      commitRepairOperations({
+        state: firstResult,
+        operations: secondOperations,
+        expectedRevision: nextRevision,
+        appliedSignature: firstSignature,
+      }),
+    ).not.toThrow(/already applied/i);
+  });
+
+  it('allows a different proposal against the same revision (only identical confirms are blocked)', () => {
+    const state = overloadedArrival();
+    const revision = computePlanRevision(state);
+    const capacity = extractRepairConflicts(state.artifacts, state.zones).find((conflict) => conflict.kind === 'capacity')!;
+    const proposal = buildRepairProposal({ state, selectedConflictIds: [capacity.id] });
+    const operations = proposal.changes.map((change) => change.operation);
+    const firstSignature = repairCommitSignature(operations, revision);
+
+    // A different ordered operation set, same revision: not a duplicate.
+    const reordered: RepairOperation[] = [...operations].reverse();
+    if (reordered.length > 0 && JSON.stringify(reordered) !== JSON.stringify(operations)) {
+      expect(() =>
+        commitRepairOperations({ state, operations: reordered, expectedRevision: revision, appliedSignature: firstSignature }),
+      ).not.toThrow(/already applied/);
+    }
   });
 
   it('applies nothing when the simulation rejects an operation mid-set', () => {
