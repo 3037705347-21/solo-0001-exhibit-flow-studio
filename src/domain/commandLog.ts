@@ -6,6 +6,7 @@ export interface CommandLogEntry {
   summary: string;
   timestamp: string;
   actor: 'local-user' | 'system';
+  details?: string;
 }
 
 export function describeAction(action: WorkspaceAction): string {

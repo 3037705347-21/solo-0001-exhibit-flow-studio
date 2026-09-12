@@ -1,11 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { makeLogEntry, type CommandLogEntry } from '../domain/commandLog';
 import { createId } from '../domain/ids';
+import { impactBaseVersion, previewArtifactImpact, summarizeImpact, type ImpactPreview } from '../domain/impactPreview';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import type { WorkspaceAction } from './actions';
+import { loadCommandLog, loadWorkspace, saveCommandLog, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -15,10 +18,22 @@ interface CommandResult<T = undefined> {
   message?: string;
 }
 
+export interface CommitArtifactResult {
+  ok: boolean;
+  stale?: boolean;
+  preview?: ImpactPreview;
+  value?: Artifact;
+  errors?: Record<string, string>;
+  message?: string;
+}
+
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
+  commandLog: CommandLogEntry[];
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
+  previewArtifactChange: (draft: ArtifactDraft, existing: Artifact) => CommandResult<ImpactPreview>;
+  commitArtifactChange: (draft: ArtifactDraft, existing: Artifact, baseVersion: string) => CommitArtifactResult;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
@@ -33,13 +48,25 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+const COMMAND_LOG_LIMIT = 50;
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
+  const [commandLog, setCommandLog] = useState<CommandLogEntry[]>(() => loadCommandLog());
 
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
+
+  useEffect(() => {
+    saveCommandLog(commandLog);
+  }, [commandLog]);
+
+  const recordAction = useCallback((action: WorkspaceAction, details?: string) => {
+    const entry: CommandLogEntry = { ...makeLogEntry(action, createId('log')), details };
+    setCommandLog((entries) => [...entries, entry].slice(-COMMAND_LOG_LIMIT));
+  }, []);
 
   const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
     const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
@@ -52,8 +79,51 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     const artifact = artifactFromDraft(draft, existing);
     dispatch({ type: 'artifact/upsert', artifact });
+    recordAction({ type: 'artifact/upsert', artifact });
     return { ok: true, value: artifact };
-  }, [state.artifacts]);
+  }, [state.artifacts, recordAction]);
+
+  const previewArtifactChange = useCallback((draft: ArtifactDraft, existing: Artifact): CommandResult<ImpactPreview> => {
+    const current = state.artifacts.find((artifact) => artifact.id === existing.id);
+    if (!current) return { ok: false, message: 'The selected object no longer exists.' };
+    const validation = validateArtifactDraft(draft, state.artifacts, current.id);
+    if (validation.length) {
+      return {
+        ok: false,
+        errors: Object.fromEntries(validation.map((error) => [error.field, error.message])),
+        message: 'Review the highlighted fields before saving.',
+      };
+    }
+    return { ok: true, value: previewArtifactImpact(state, artifactFromDraft(draft, current)) };
+  }, [state]);
+
+  const commitArtifactChange = useCallback((draft: ArtifactDraft, existing: Artifact, baseVersion: string): CommitArtifactResult => {
+    const current = state.artifacts.find((artifact) => artifact.id === existing.id);
+    if (!current) return { ok: false, message: 'The selected object no longer exists.' };
+    const validation = validateArtifactDraft(draft, state.artifacts, current.id);
+    if (validation.length) {
+      return {
+        ok: false,
+        errors: Object.fromEntries(validation.map((error) => [error.field, error.message])),
+        message: 'Review the highlighted fields before saving.',
+      };
+    }
+    const artifact = artifactFromDraft(draft, current);
+    if (impactBaseVersion(state) !== baseVersion) {
+      // The object or the plan changed after the preview was computed:
+      // recompute the impact against the current workspace instead of trusting the stale preview.
+      return {
+        ok: false,
+        stale: true,
+        preview: previewArtifactImpact(state, artifact),
+        message: 'The plan changed after this impact preview was computed. Review the refreshed impact before confirming.',
+      };
+    }
+    const preview = previewArtifactImpact(state, artifact);
+    dispatch({ type: 'artifact/upsert', artifact });
+    recordAction({ type: 'artifact/upsert', artifact }, summarizeImpact(preview));
+    return { ok: true, value: artifact };
+  }, [state, recordAction]);
 
   const removeArtifact = useCallback((artifactId: string): CommandResult => {
     const artifact = state.artifacts.find((candidate) => candidate.id === artifactId);
@@ -141,7 +211,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
+    commandLog,
     upsertArtifact,
+    previewArtifactChange,
+    commitArtifactChange,
     removeArtifact,
     assignArtifact,
     removePlacement,
@@ -152,7 +225,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, commandLog, upsertArtifact, previewArtifactChange, commitArtifactChange, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

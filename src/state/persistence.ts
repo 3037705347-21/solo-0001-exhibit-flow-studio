@@ -1,9 +1,11 @@
+import type { CommandLogEntry } from '../domain/commandLog';
 import type { IssueStatus, WorkspaceState } from '../domain/models';
 import { createSeedWorkspace } from './seed';
 import { migrateWorkspace, validateReferences } from './migrations';
 
 export const STORAGE_KEY = 'exhibit-flow.workspace.v1';
 export const REVIEW_UI_KEY = 'exhibit-flow.review-ui.v1';
+export const COMMAND_LOG_KEY = 'exhibit-flow.command-log.v1';
 
 export interface ReviewUiState {
   zoneId: string;
@@ -73,5 +75,34 @@ export function saveReviewUi(ui: ReviewUiState, storage: Pick<Storage, 'setItem'
     storage.setItem(REVIEW_UI_KEY, JSON.stringify(ui));
   } catch {
     // UI preferences are non-critical; ignore storage failures.
+  }
+}
+
+function isCommandLogEntry(value: unknown): value is CommandLogEntry {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<CommandLogEntry>;
+  return typeof candidate.id === 'string'
+    && typeof candidate.action === 'string'
+    && typeof candidate.summary === 'string'
+    && typeof candidate.timestamp === 'string'
+    && (candidate.actor === 'local-user' || candidate.actor === 'system');
+}
+
+export function loadCommandLog(storage: Pick<Storage, 'getItem'> = localStorage): CommandLogEntry[] {
+  try {
+    const raw = storage.getItem(COMMAND_LOG_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isCommandLogEntry) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCommandLog(entries: CommandLogEntry[], storage: Pick<Storage, 'setItem'> = localStorage): void {
+  try {
+    storage.setItem(COMMAND_LOG_KEY, JSON.stringify(entries));
+  } catch {
+    // The audit trail is best-effort; ignore storage failures.
   }
 }

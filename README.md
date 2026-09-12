@@ -39,3 +39,5 @@ npm run check       # all checks in sequence
 ## Design notes
 
 State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.
+
+Editing an existing object runs an impact pre-check before anything is saved: the editor diffs the draft against the current workspace version and previews affected zones, added or resolved constraint findings, and the readiness outcome. Confirming re-checks the workspace version — if the object or the plan changed since the preview, the impact is recomputed instead of applying the stale one. Confirmed edits append a timestamped entry to a local command log (`exhibit-flow.command-log.v1`).
