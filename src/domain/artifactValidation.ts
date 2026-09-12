@@ -50,8 +50,8 @@ export function validateArtifactDraft(draft: ArtifactDraft, artifacts: Artifact[
   return errors;
 }
 
-export function artifactFromDraft(draft: ArtifactDraft, existing?: Artifact): Artifact {
-  const now = new Date().toISOString();
+export function artifactFromDraft(draft: ArtifactDraft, existing?: Artifact, at = new Date()): Artifact {
+  const now = at.toISOString();
   return {
     id: existing?.id ?? createId('artifact'),
     accessionId: normalizeAccessionId(draft.accessionId),
@@ -76,6 +76,7 @@ export function artifactFromDraft(draft: ArtifactDraft, existing?: Artifact): Ar
     color: draft.color,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    revision: (existing?.revision ?? 0) + 1,
   };
 }
 

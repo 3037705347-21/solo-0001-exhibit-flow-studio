@@ -12,6 +12,8 @@ export function describeAction(action: WorkspaceAction): string {
   switch (action.type) {
     case 'artifact/upsert': return `Saved object ${action.artifact.accessionId}`;
     case 'artifact/remove': return `Removed object ${action.artifactId}`;
+    case 'artifact/restore-field': return `Restored one field on object ${action.artifactId}`;
+    case 'artifact/restore-revision': return `Restored object ${action.artifactId} to an earlier version`;
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;

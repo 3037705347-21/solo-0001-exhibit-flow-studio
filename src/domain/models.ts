@@ -31,6 +31,26 @@ export interface Artifact {
   color: string;
   createdAt: string;
   updatedAt: string;
+  revision: number;
+}
+
+export type RevisionKind = 'create' | 'edit' | 'restore-field' | 'restore-object';
+
+export interface RevisionFieldChange {
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface ArtifactRevision {
+  id: string;
+  artifactId: string;
+  version: number;
+  kind: RevisionKind;
+  reason: string;
+  changedAt: string;
+  changes: RevisionFieldChange[];
+  snapshot: Artifact;
 }
 
 export interface Zone {
@@ -83,6 +103,7 @@ export interface WorkspaceState {
   artifacts: Artifact[];
   zones: Zone[];
   issues: ReviewIssue[];
+  revisions: ArtifactRevision[];
   preferences: PlanningPreferences;
   lastSavedAt?: string;
 }

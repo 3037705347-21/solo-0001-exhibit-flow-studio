@@ -1,9 +1,48 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
-import type { WorkspaceState } from '../domain/models';
+import {
+  applyFieldRestore,
+  applyRevisionRestore,
+  createRevisionEntry,
+  hasAccessionCollision,
+  isTrackedField,
+  RevisionConflictError,
+} from '../domain/revisions';
+import type { Artifact, ArtifactRevision, WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
 function stamp(state: WorkspaceState): WorkspaceState {
   return { ...state, lastSavedAt: new Date().toISOString() };
+}
+
+/**
+ * Replaces an artifact in place and appends the revision that describes the
+ * change. The object id never changes, so zone placements, review findings,
+ * readiness results, and exports keep referencing the same identity.
+ */
+function commitArtifactRevision(state: WorkspaceState, next: Artifact, revision: ArtifactRevision): WorkspaceState {
+  return stamp(regressReadyProject({
+    ...state,
+    artifacts: state.artifacts.map((artifact) => artifact.id === next.id ? next : artifact),
+    revisions: [...state.revisions, revision],
+  }));
+}
+
+function requireCurrentArtifact(state: WorkspaceState, artifactId: string): Artifact {
+  const current = state.artifacts.find((artifact) => artifact.id === artifactId);
+  if (!current) throw new Error('The selected object no longer exists.');
+  return current;
+}
+
+function guardBaseVersion(current: Artifact, baseVersion: number | undefined): void {
+  if (baseVersion === undefined || current.revision !== baseVersion) {
+    throw new RevisionConflictError(current.revision, baseVersion);
+  }
+}
+
+function requireSourceRevision(state: WorkspaceState, artifactId: string, revisionId: string): ArtifactRevision {
+  const source = state.revisions.find((revision) => revision.id === revisionId && revision.artifactId === artifactId);
+  if (!source) throw new Error('The selected revision is no longer part of this object\'s history.');
+  return source;
 }
 
 function removeArtifactFromZones(state: WorkspaceState, artifactId: string): WorkspaceState {
@@ -55,11 +94,23 @@ function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: stri
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
     case 'artifact/upsert': {
-      const exists = state.artifacts.some((artifact) => artifact.id === action.artifact.id);
-      const artifacts = exists
-        ? state.artifacts.map((artifact) => artifact.id === action.artifact.id ? action.artifact : artifact)
-        : [...state.artifacts, action.artifact];
-      return stamp(regressReadyProject({ ...state, artifacts }));
+      const current = state.artifacts.find((artifact) => artifact.id === action.artifact.id);
+      if (current) guardBaseVersion(current, action.baseVersion);
+      const revision = createRevisionEntry({
+        artifactId: action.artifact.id,
+        before: current,
+        after: action.artifact,
+        reason: action.reason,
+        kind: current ? 'edit' : 'create',
+        at: action.at,
+      });
+      if (current && revision.changes.length === 0) return state;
+      if (current) return commitArtifactRevision(state, action.artifact, revision);
+      return stamp(regressReadyProject({
+        ...state,
+        artifacts: [...state.artifacts, action.artifact],
+        revisions: [...state.revisions, revision],
+      }));
     }
     case 'artifact/remove': {
       const withoutPlacement = removeArtifactFromZones(state, action.artifactId);
@@ -67,7 +118,49 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         ...withoutPlacement,
         artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
         issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
+        revisions: withoutPlacement.revisions.filter((revision) => revision.artifactId !== action.artifactId),
       }));
+    }
+    case 'artifact/restore-field': {
+      const current = requireCurrentArtifact(state, action.artifactId);
+      guardBaseVersion(current, action.baseVersion);
+      const source = requireSourceRevision(state, action.artifactId, action.revisionId);
+      if (!isTrackedField(action.field)) {
+        throw new Error(`The field "${action.field}" is not tracked by the revision history.`);
+      }
+      const restored = applyFieldRestore(current, source, action.field, action.at);
+      if (!restored) return state;
+      if (action.field === 'accessionId' && hasAccessionCollision(state.artifacts, restored)) {
+        throw new Error('Restoring this accession ID would duplicate another object in the collection.');
+      }
+      const revision = createRevisionEntry({
+        artifactId: current.id,
+        before: current,
+        after: restored,
+        reason: action.reason,
+        kind: 'restore-field',
+        at: action.at,
+      });
+      return commitArtifactRevision(state, restored, revision);
+    }
+    case 'artifact/restore-revision': {
+      const current = requireCurrentArtifact(state, action.artifactId);
+      guardBaseVersion(current, action.baseVersion);
+      const source = requireSourceRevision(state, action.artifactId, action.revisionId);
+      const restored = applyRevisionRestore(current, source, action.at);
+      if (!restored) return state;
+      if (hasAccessionCollision(state.artifacts, restored)) {
+        throw new Error('Restoring this version would duplicate another object\'s accession ID.');
+      }
+      const revision = createRevisionEntry({
+        artifactId: current.id,
+        before: current,
+        after: restored,
+        reason: action.reason,
+        kind: 'restore-object',
+        at: action.at,
+      });
+      return commitArtifactRevision(state, restored, revision);
     }
     case 'placement/assign':
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));

@@ -16,6 +16,7 @@ The application is a pure frontend project. It does not require accounts, a serv
 
 - `Project`: the exhibition title, venue, visitor target, opening date, and readiness state.
 - `Artifact`: an object or media element with a period, medium, dimensions, narrative role, sensitivity, accessibility needs, and estimated dwell time.
+- `ArtifactRevision`: one entry in an object's revision chain, recording the before/after field values, the basis for the change, the time, and the resulting version.
 - `Zone`: a sequenced part of the visitor journey with a theme, capacity, color, and artifact placements.
 - `Placement`: the assignment of an artifact to a zone and a position in that zone.
 - `ReviewIssue`: a severity-ranked finding linked to a zone or artifact, with open, in-progress, or resolved state.
@@ -26,6 +27,8 @@ The application is a pure frontend project. It does not require accounts, a serv
 ### 1. Curate the object set
 
 The user opens the collection view, searches and filters existing objects, adds an object through a validated editor, and sees it enter the collection. Duplicate accession identifiers, missing titles, invalid dimensions, and invalid dwell times are rejected with field-level messages. The created object is persisted in local storage and becomes immediately available to the journey planner.
+
+Every edit to an existing object requires a recorded change basis and appends to the object's revision chain: each entry stores the before/after field values, the reason, the timestamp, and the resulting version. The history view shows the diff of every revision and can restore a single field or a whole earlier version; a restore is itself recorded as a new revision and never changes the object identity that placements, findings, readiness, and exports reference. Saves and restores carry the version they were based on, so a change made on top of a stale version is rejected as a conflict instead of silently overwriting newer work.
 
 ### 2. Build and validate the visitor journey
 
@@ -43,6 +46,8 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
 - Artifact accession identifiers are normalized and unique.
+- Artifact edits are versioned: each change appends a revision with before/after values, a recorded basis, and a timestamp, and edits or restores based on a stale version are rejected as conflicts.
+- Restoring a field or a full revision updates the object in place; the object id never changes, so placements, findings, readiness, and snapshots keep referencing the same identity.
 - Every artifact must have a positive dwell time and valid physical dimensions.
 - A zone warns above 80% of its dwell capacity and blocks above 100%.
 - High-sensitivity objects require a low-light zone.

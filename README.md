@@ -33,6 +33,7 @@ npm run check       # all checks in sequence
 ## Inputs and outputs
 
 - Object records accept accession ID, title, maker, period, medium, origin, dimensions, dwell time, narrative role, sensitivity, access need, tags, and key-object status.
+- Every object edit records a change basis and appends a revision with before/after values, a timestamp, and a version; the collection history view can restore one field or a full earlier version, and restores are recorded as new revisions. Saves and restores made from a stale version are rejected as conflicts so newer work is never overwritten.
 - Review findings accept severity, owner, optional zone/object links, and decision context.
 - A successful readiness check enables a JSON file named `exhibit-flow-snapshot-YYYY-MM-DD.json` containing the project, sequenced zones, objects, summary metrics, and unresolved non-blocking issues.
 

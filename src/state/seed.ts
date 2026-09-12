@@ -1,17 +1,8 @@
-import type { WorkspaceState } from '../domain/models';
+import type { Artifact, WorkspaceState } from '../domain/models';
+import { createRevisionEntry } from '../domain/revisions';
 
 export function createSeedWorkspace(): WorkspaceState {
-  return {
-    version: 1,
-    project: {
-      id: 'project-afterlight',
-      title: 'Afterlight: Material Memory',
-      venue: 'North Hall / Gallery 3',
-      audience: 'General visitors, age 12+',
-      openingDate: '2027-03-18',
-      stage: 'review',
-    },
-    artifacts: [
+  const artifacts: Artifact[] = [
       {
         id: 'artifact-lantern',
         accessionId: 'AF-1908-014',
@@ -31,6 +22,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#d7654e',
         createdAt: '2026-08-11T09:00:00.000Z',
         updatedAt: '2026-08-11T09:00:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-sample-book',
@@ -51,6 +43,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#7c6aa6',
         createdAt: '2026-08-11T09:05:00.000Z',
         updatedAt: '2026-08-11T09:05:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-press',
@@ -71,6 +64,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#2f7c75',
         createdAt: '2026-08-11T09:10:00.000Z',
         updatedAt: '2026-08-11T09:10:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-radio',
@@ -91,6 +85,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#c7903d',
         createdAt: '2026-08-11T09:15:00.000Z',
         updatedAt: '2026-08-11T09:15:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-quilt',
@@ -111,6 +106,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#3f6fa8',
         createdAt: '2026-08-11T09:20:00.000Z',
         updatedAt: '2026-08-11T09:20:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-bowl',
@@ -131,6 +127,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#8c9474',
         createdAt: '2026-08-11T09:25:00.000Z',
         updatedAt: '2026-08-11T09:25:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-tape',
@@ -151,6 +148,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#a55f72',
         createdAt: '2026-08-11T09:30:00.000Z',
         updatedAt: '2026-08-11T09:30:00.000Z',
+        revision: 1,
       },
       {
         id: 'artifact-gloves',
@@ -171,8 +169,28 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#597b8e',
         createdAt: '2026-08-11T09:35:00.000Z',
         updatedAt: '2026-08-11T09:35:00.000Z',
+        revision: 1,
       },
-    ],
+  ];
+  return {
+    version: 1,
+    project: {
+      id: 'project-afterlight',
+      title: 'Afterlight: Material Memory',
+      venue: 'North Hall / Gallery 3',
+      audience: 'General visitors, age 12+',
+      openingDate: '2027-03-18',
+      stage: 'review',
+    },
+    artifacts,
+    revisions: artifacts.map((artifact) => createRevisionEntry({
+      artifactId: artifact.id,
+      after: artifact,
+      kind: 'create',
+      reason: 'Baseline record imported with the sample plan.',
+      at: new Date(artifact.createdAt),
+      id: `revision-${artifact.id}-v1`,
+    })),
     zones: [
       {
         id: 'zone-arrival',

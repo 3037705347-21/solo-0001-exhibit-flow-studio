@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { REVISION_FIELD_LABELS, RevisionConflictError, diffArtifacts, type TrackedArtifactField } from '../domain/revisions';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
@@ -13,13 +14,16 @@ interface CommandResult<T = undefined> {
   value?: T;
   errors?: Record<string, string>;
   message?: string;
+  conflict?: boolean;
 }
 
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
-  upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
+  upsertArtifact: (draft: ArtifactDraft, existing?: Artifact, reason?: string) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
+  restoreArtifactField: (artifactId: string, revisionId: string, field: TrackedArtifactField) => CommandResult;
+  restoreArtifactRevision: (artifactId: string, revisionId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
@@ -33,6 +37,13 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+function dispatchError<T = undefined>(error: unknown, fallback: string): CommandResult<T> {
+  if (error instanceof RevisionConflictError) {
+    return { ok: false, conflict: true, message: error.message };
+  }
+  return { ok: false, message: error instanceof Error ? error.message : fallback };
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
@@ -41,7 +52,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
 
-  const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
+  const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact, reason?: string): CommandResult<Artifact> => {
     const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
     if (validation.length) {
       return {
@@ -50,8 +61,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         message: 'Review the highlighted fields before saving.',
       };
     }
+    const current = existing ? state.artifacts.find((artifact) => artifact.id === existing.id) : undefined;
+    if (existing) {
+      if (!reason?.trim()) {
+        return { ok: false, errors: { reason: 'Record the basis for this change so the history stays auditable.' } };
+      }
+      if (!current) return { ok: false, message: 'This object was removed by another change. Reload the collection before editing.' };
+      if (current.revision !== existing.revision) {
+        return {
+          ok: false,
+          conflict: true,
+          message: `This object changed elsewhere and is now at version ${current.revision}. Reload the latest record before saving.`,
+        };
+      }
+    }
     const artifact = artifactFromDraft(draft, existing);
-    dispatch({ type: 'artifact/upsert', artifact });
+    if (current && diffArtifacts(current, artifact).length === 0) {
+      return { ok: true, value: current };
+    }
+    try {
+      dispatch({
+        type: 'artifact/upsert',
+        artifact,
+        reason: reason?.trim() || 'Added to the collection.',
+        baseVersion: existing?.revision,
+      });
+    } catch (error) {
+      return dispatchError(error, 'The object could not be saved.');
+    }
     return { ok: true, value: artifact };
   }, [state.artifacts]);
 
@@ -61,6 +98,45 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'artifact/remove', artifactId });
     return { ok: true };
   }, [state.artifacts]);
+
+  const restoreArtifactField = useCallback((artifactId: string, revisionId: string, field: TrackedArtifactField): CommandResult => {
+    const current = state.artifacts.find((artifact) => artifact.id === artifactId);
+    if (!current) return { ok: false, message: 'The selected object no longer exists.' };
+    const source = state.revisions.find((revision) => revision.id === revisionId && revision.artifactId === artifactId);
+    if (!source) return { ok: false, message: 'The selected revision is no longer part of this object\'s history.' };
+    try {
+      dispatch({
+        type: 'artifact/restore-field',
+        artifactId,
+        revisionId,
+        field,
+        reason: `Restored ${REVISION_FIELD_LABELS[field]} from version ${source.version}.`,
+        baseVersion: current.revision,
+      });
+      return { ok: true };
+    } catch (error) {
+      return dispatchError(error, 'The field could not be restored.');
+    }
+  }, [state.artifacts, state.revisions]);
+
+  const restoreArtifactRevision = useCallback((artifactId: string, revisionId: string): CommandResult => {
+    const current = state.artifacts.find((artifact) => artifact.id === artifactId);
+    if (!current) return { ok: false, message: 'The selected object no longer exists.' };
+    const source = state.revisions.find((revision) => revision.id === revisionId && revision.artifactId === artifactId);
+    if (!source) return { ok: false, message: 'The selected revision is no longer part of this object\'s history.' };
+    try {
+      dispatch({
+        type: 'artifact/restore-revision',
+        artifactId,
+        revisionId,
+        reason: `Restored the full record to version ${source.version}.`,
+        baseVersion: current.revision,
+      });
+      return { ok: true };
+    } catch (error) {
+      return dispatchError(error, 'The revision could not be restored.');
+    }
+  }, [state.artifacts, state.revisions]);
 
   const assignArtifact = useCallback((artifactId: string, zoneId: string): CommandResult => {
     try {
@@ -143,6 +219,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     storageHealthy,
     upsertArtifact,
     removeArtifact,
+    restoreArtifactField,
+    restoreArtifactRevision,
     assignArtifact,
     removePlacement,
     reorderArtifact,
@@ -152,7 +230,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, restoreArtifactField, restoreArtifactRevision, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
