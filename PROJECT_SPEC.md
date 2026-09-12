@@ -50,6 +50,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
+- Zone reordering is a previewed transaction: the staged order shows timeline, export, and readiness impact before commit; committing rewrites every sequence, marks exports recorded against the old order as stale, flags resolved findings on moved zones for re-review, and regresses a ready project. Commits are guarded by the signature of the order they were staged from, so concurrent changes are rejected rather than overwritten, and cancellation or failure leaves the old order and its outputs intact.
 
 ## Modules and dependency direction
 

@@ -1,6 +1,9 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { applyZoneReorder } from '../domain/zoneReorder';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
+
+const EXPORT_LEDGER_LIMIT = 12;
 
 function stamp(state: WorkspaceState): WorkspaceState {
   return { ...state, lastSavedAt: new Date().toISOString() };
@@ -75,6 +78,10 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+    case 'zone/reorder':
+      return stamp(applyZoneReorder(state, action.order, action.baseSignature, action.at ? new Date(action.at) : undefined));
+    case 'export/record':
+      return stamp({ ...state, exports: [action.record, ...state.exports].slice(0, EXPORT_LEDGER_LIMIT) });
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
     case 'issue/transition':

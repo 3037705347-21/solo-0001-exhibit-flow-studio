@@ -3,7 +3,8 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import { previewZoneReorder, zoneOrderSignature, type ZoneReorderImpact } from '../domain/zoneReorder';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState, Zone } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -13,6 +14,7 @@ interface CommandResult<T = undefined> {
   value?: T;
   errors?: Record<string, string>;
   message?: string;
+  code?: 'conflict' | 'validation';
 }
 
 interface WorkspaceContextValue {
@@ -23,6 +25,8 @@ interface WorkspaceContextValue {
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
+  reorderZones: (order: string[], baseSignature: string) => CommandResult<ZoneReorderImpact>;
+  recordChecklistExport: (zone: Zone) => void;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
@@ -84,6 +88,40 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const reorderZones = useCallback((order: string[], baseSignature: string): CommandResult<ZoneReorderImpact> => {
+    if (zoneOrderSignature(state.zones) !== baseSignature) {
+      return {
+        ok: false,
+        code: 'conflict',
+        message: 'The zone order changed since this preview was prepared. Reset to the current order and stage the change again.',
+      };
+    }
+    const result = previewZoneReorder(state, order);
+    if (!result.ok) return { ok: false, code: 'validation', message: result.errors[0] };
+    if (result.preview.isNoOp) return { ok: false, code: 'validation', message: 'The staged order matches the current sequence.' };
+    try {
+      dispatch({ type: 'zone/reorder', order, baseSignature });
+      return { ok: true, value: result.preview.impact };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The zone order could not be updated.' };
+    }
+  }, [state]);
+
+  const recordChecklistExport = useCallback((zone: Zone) => {
+    dispatch({
+      type: 'export/record',
+      record: {
+        id: createId('export'),
+        kind: 'zone-checklist',
+        label: `${zone.name} checklist`,
+        zoneId: zone.id,
+        generatedAt: new Date().toISOString(),
+        zoneOrderSignature: zoneOrderSignature(state.zones),
+        status: 'current',
+      },
+    });
+  }, [state.zones]);
+
   const addIssue = useCallback((draft: IssueDraft): CommandResult => {
     if (!draft.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
     if (draft.description.trim().length < 16) return { ok: false, errors: { description: 'Add at least 16 characters of context.' } };
@@ -133,7 +171,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const readiness = evaluateReadiness(state, analysis);
     if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
-    return { ok: true, value: buildSnapshot(state, analysis, readiness) };
+    const snapshot = buildSnapshot(state, analysis, readiness);
+    dispatch({
+      type: 'export/record',
+      record: {
+        id: createId('export'),
+        kind: 'snapshot',
+        label: 'Readiness snapshot (JSON)',
+        generatedAt: snapshot.generatedAt,
+        zoneOrderSignature: zoneOrderSignature(state.zones),
+        status: 'current',
+      },
+    });
+    return { ok: true, value: snapshot };
   }, [state]);
 
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
@@ -146,13 +196,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     assignArtifact,
     removePlacement,
     reorderArtifact,
+    reorderZones,
+    recordChecklistExport,
     addIssue,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, reorderZones, recordChecklistExport, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -67,6 +67,19 @@ export interface PlanningPreferences {
   groupSize: number;
 }
 
+export type ExportKind = 'snapshot' | 'zone-checklist';
+export type ExportStatus = 'current' | 'stale';
+
+export interface ExportRecord {
+  id: string;
+  kind: ExportKind;
+  label: string;
+  zoneId?: string;
+  generatedAt: string;
+  zoneOrderSignature: string;
+  status: ExportStatus;
+}
+
 export interface ExhibitProject {
   id: string;
   title: string;
@@ -84,6 +97,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  exports: ExportRecord[];
   lastSavedAt?: string;
 }
 

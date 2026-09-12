@@ -1,4 +1,4 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileJson, FileText, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
@@ -11,7 +11,7 @@ import { downloadTextFile } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
 import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
 import { analyzeJourney } from '../../domain/journeyAnalysis';
-import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
+import type { ExportRecord, IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
 import { evaluateReadiness } from '../../domain/reviewRules';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
 import { loadReviewUi, saveReviewUi, type ReviewUiState } from '../../state/persistence';
@@ -21,7 +21,7 @@ type StatusFilter = IssueStatus | 'all';
 const STATUS_FILTERS: StatusFilter[] = ['all', 'open', 'in-progress', 'resolved'];
 
 export function ReviewPage() {
-  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
+  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot, recordChecklistExport } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
   const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
@@ -62,12 +62,14 @@ export function ReviewPage() {
   const exportChecklist = () => {
     if (!selectedZone || !checklist) return;
     downloadTextFile(serializeZoneChecklistCsv(checklist), zoneChecklistFileName(selectedZone), 'text/csv;charset=utf-8');
+    recordChecklistExport(selectedZone);
     notify('Zone checklist downloaded.');
   };
 
   return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
     <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
     {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
+    <ExportsCard records={state.exports} />
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
     <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
@@ -77,6 +79,20 @@ export function ReviewPage() {
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
   </div>;
+}
+
+function ExportsCard({ records }: { records: ExportRecord[] }) {
+  const staleCount = records.filter((record) => record.status === 'stale').length;
+  const summary = records.length === 0 ? 'None yet' : staleCount ? `${staleCount} out of date` : 'Up to date';
+  return <section className="exports-card" aria-label="Exported materials">
+    <div className="panel-heading"><div><div className="eyebrow">PUBLISHED MATERIALS</div><h2>Exported materials</h2></div><Badge tone={staleCount ? 'warning' : records.length ? 'positive' : 'neutral'}>{summary}</Badge></div>
+    {records.length === 0 ? <p className="exports-empty">Snapshots and zone checklists you download are tracked here. If the visit order changes, materials generated against the old order are flagged so they can be regenerated.</p> : <div className="export-list">{records.map((record) => <div className="export-row" key={record.id}>
+      {record.kind === 'snapshot' ? <FileJson size={15} /> : <FileText size={15} />}
+      <span className="export-label"><strong>{record.label}</strong><small>Generated {formatDate(record.generatedAt)}</small></span>
+      {record.status === 'stale' && <small className="export-hint">Visit order changed — export again to refresh.</small>}
+      <Badge tone={record.status === 'stale' ? 'warning' : 'positive'}>{record.status === 'stale' ? 'Out of date' : 'Current'}</Badge>
+    </div>)}</div>}
+  </section>;
 }
 
 function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<ReturnType<typeof buildZoneChecklist>>; onDownload: () => void }) {

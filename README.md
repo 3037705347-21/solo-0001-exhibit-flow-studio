@@ -25,8 +25,8 @@ npm run check       # all checks in sequence
 - `src/domain`: entities, validation boundaries, journey analysis, state transitions, readiness, and scenario projection.
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
 - `src/features/collection`: searchable object library and validated editor.
-- `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
-- `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
+- `src/features/journey`: sequenced zone lanes, placement commands, constraint feedback, and the previewed zone-reorder transaction.
+- `src/features/review`: finding lifecycle, readiness gate, snapshot export, and the exported-materials ledger.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
 - `src/components`: shared shell, navigation, forms, badges, metrics, dialogs, and visual primitives.
 
@@ -39,3 +39,5 @@ npm run check       # all checks in sequence
 ## Design notes
 
 State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.
+
+Reordering zones is a previewed transaction: the staged order shows its impact on the visit timeline, exported materials, and readiness before it is applied. On commit every zone sequence is rewritten, exports recorded against the old order are marked out of date, resolved findings linked to moved zones are flagged for re-review, and a ready project regresses to review. The commit carries the signature of the order it was staged from, so a concurrent change is rejected instead of overwritten; cancelling or a failed commit leaves the old order and its outputs untouched.

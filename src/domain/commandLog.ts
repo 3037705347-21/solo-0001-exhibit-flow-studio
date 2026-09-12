@@ -15,6 +15,8 @@ export function describeAction(action: WorkspaceAction): string {
     case 'placement/assign': return `Placed object in zone ${action.zoneId}`;
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;
+    case 'zone/reorder': return 'Reordered exhibition zones';
+    case 'export/record': return `Exported ${action.record.label}`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
