@@ -7,7 +7,7 @@ import { commitAllocation } from '../domain/workload';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, AssignmentAuditEntry, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, parseWorkspaceJson, saveWorkspace, STORAGE_KEY } from './persistence';
+import { loadStoredWorkspace, loadWorkspace, parseWorkspaceJson, saveWorkspace, STORAGE_KEY } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -35,7 +35,7 @@ interface WorkspaceContextValue {
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
-  commitAllocationPlan: (plan: AllocationPlan) => AllocationCommandResult;
+  commitAllocationPlan: (plan: AllocationPlan) => Promise<AllocationCommandResult>;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
@@ -44,19 +44,40 @@ interface WorkspaceContextValue {
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
+/** Cross-tab mutex name shared by every allocation transaction. */
+const ALLOCATION_LOCK_NAME = 'exhibit-flow.allocation.v1';
+
+interface LockManagerLike {
+  request(name: string, callback: () => Promise<void> | void): Promise<void>;
+}
+
+function getLockManager(): LockManagerLike | null {
+  const locks = (navigator as Navigator & { locks?: LockManagerLike }).locks;
+  return typeof locks?.request === 'function' ? locks : null;
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
   const stateRef = useRef(state);
   stateRef.current = state;
   const appliedPlansRef = useRef<Set<string>>(new Set());
+  // State adopted from a direct transaction write or an external tab; the next
+  // persistence effect must skip it so we never echo authoritative storage
+  // content back and clobber a peer.
+  const adoptedStateRef = useRef<WorkspaceState | null>(null);
 
   useEffect(() => {
+    if (adoptedStateRef.current === state) {
+      adoptedStateRef.current = null;
+      setStorageHealthy(true);
+      return;
+    }
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
 
-  // Adopt writes committed in another tab. Allocation transactions still
-  // defend themselves at commit time via issue versions.
+  // Adopt writes committed in another tab. Allocation transactions also
+  // serialize on a named lock and re-read storage before writing.
   useEffect(() => {
     const onExternalChange = (event: StorageEvent) => {
       if (event.key !== STORAGE_KEY || !event.newValue) return;
@@ -64,7 +85,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       try { incoming = parseWorkspaceJson(event.newValue); } catch { incoming = null; }
       if (!incoming) return;
       if (incoming.lastSavedAt === stateRef.current.lastSavedAt) return;
-      dispatch({ type: 'workspace/syncExternal', state: incoming, audit: incoming.assignmentLog });
+      // Merge any audit entries missing locally before handing state to the
+      // reducer so the complete trail survives either side winning.
+      const known = new Set(stateRef.current.assignmentLog.map((entry) => entry.id));
+      const mergedAudit = [
+        ...stateRef.current.assignmentLog,
+        ...incoming.assignmentLog.filter((entry) => !known.has(entry.id)),
+      ];
+      const adopted = { ...incoming, assignmentLog: mergedAudit };
+      adoptedStateRef.current = adopted;
+      dispatch({ type: 'workspace/syncExternal', state: adopted, audit: mergedAudit });
     };
     window.addEventListener('storage', onExternalChange);
     return () => window.removeEventListener('storage', onExternalChange);
@@ -148,34 +178,71 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [state.issues]);
 
-  const commitAllocationPlan = useCallback((plan: AllocationPlan): AllocationCommandResult => {
+  const commitAllocationPlan = useCallback(async (plan: AllocationPlan): Promise<AllocationCommandResult> => {
     // Synchronous guard so a double click in the same UI task reports a
-    // duplicate instead of racing the reducer's state update.
+    // duplicate instead of queuing behind the lock.
     if (appliedPlansRef.current.has(plan.planId)) {
       return { ok: true, duplicate: true, audit: [], message: 'This allocation was already applied.' };
     }
-    // Validate against the freshest state synchronously, so the batch is
-    // all-or-nothing even if a storage event landed between render and click.
-    const result = commitAllocation(stateRef.current, plan);
-    if (!result.ok) {
-      return {
-        ok: false,
-        conflicts: result.conflicts,
-        message: 'The workload changed while the batch was open. Review the conflicts and refresh.',
+
+    const runTransaction = (): AllocationCommandResult => {
+      // Re-read shared state straight from storage under the lock: another tab
+      // may have committed after this dialog opened. Fall back to in-memory
+      // state when nothing is persisted yet (first run) or storage is unreadable.
+      const shared = loadStoredWorkspace() ?? stateRef.current;
+      const result = commitAllocation(shared, plan);
+
+      if (!result.ok) {
+        return {
+          ok: false,
+          conflicts: result.conflicts,
+          message: 'The workload changed while the batch was open. Review the conflicts and refresh.',
+        };
+      }
+      if (result.duplicate) {
+        appliedPlansRef.current.add(plan.planId);
+        return { ok: true, duplicate: true, audit: [], message: 'This allocation was already applied.' };
+      }
+      if (result.audit.length === 0) {
+        return { ok: true, audit: [], duplicate: false };
+      }
+
+      // read → validate → write all run in one synchronous lock-held task, so
+      // no other tab (allocation commits hold the same lock; other writes are
+      // blocked from interleaving by the event loop) can slip in between.
+      const committed: WorkspaceState = {
+        ...result.state,
+        lastSavedAt: new Date().toISOString(),
       };
-    }
-    if (result.duplicate) {
+      if (!saveWorkspace(committed)) {
+        return { ok: false, message: 'The allocation could not be saved to this browser.' };
+      }
       appliedPlansRef.current.add(plan.planId);
-      return { ok: true, duplicate: true, audit: [], message: 'This allocation was already applied.' };
+      if (appliedPlansRef.current.size > 20) {
+        appliedPlansRef.current = new Set([...appliedPlansRef.current].slice(-10));
+      }
+      // Adopt the authoritative committed state without a second storage
+      // write; the persistence effect skips this exact reference.
+      adoptedStateRef.current = committed;
+      dispatch({ type: 'allocation/committed', state: committed, movedCount: result.audit.length, duplicate: false });
+      return { ok: true, audit: result.audit };
+    };
+
+    const locks = getLockManager();
+    if (locks) {
+      // Named Web Lock: allocation commits in every tab are mutually exclusive.
+      try {
+        let outcome: AllocationCommandResult = { ok: false, message: 'Allocation transaction failed.' };
+        await locks.request(ALLOCATION_LOCK_NAME, async () => {
+          outcome = runTransaction();
+        });
+        return outcome;
+      } catch {
+        // A lock failure must never silently apply; fall through to a direct
+        // best-effort transaction where version checks still reject drift.
+      }
     }
-    appliedPlansRef.current.add(plan.planId);
-    // Keep only recent plan ids; the assignment log remains the durable guard.
-    if (appliedPlansRef.current.size > 20) {
-      const entries = [...appliedPlansRef.current].slice(-10);
-      appliedPlansRef.current = new Set(entries);
-    }
-    dispatch({ type: 'issues/reassignBatch', plan });
-    return { ok: true, audit: result.audit };
+    return runTransaction();
   }, []);
 
   const updatePreferences = useCallback((preferences: PlanningPreferences) => {

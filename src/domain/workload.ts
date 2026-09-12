@@ -184,9 +184,10 @@ export function validateTargets(items: AllocationItem[]): AllocationConflict[] {
 
 /**
  * Detect external changes since the operator last acknowledged state (batch
- * open or explicit refresh). Findings that disappeared, changed status,
- * changed owner, or carry a newer version are reported; the batch cannot
- * commit until the operator refreshes over the change.
+ * open or explicit refresh). The batch is rejected wholesale when any finding
+ * disappeared, changed status, or changed owner. The owner/status checks also
+ * cover any version bump that carried them; a bare version bump is reported
+ * separately.
  */
 export function detectConflicts(items: AllocationItem[], issues: ReviewIssue[]): AllocationConflict[] {
   const byId = new Map(issues.map((issue) => [issue.id, issue]));
@@ -222,20 +223,21 @@ function movesOf(items: AllocationItem[]) {
 }
 
 /**
- * Pure workload projection. `before` is computed from active (non-resolved)
- * findings; `after` applies the validated moves. Resolved findings stay with
- * their owner and never count toward load.
+ * Pure workload projection. `before` is the live workload from active
+ * (non-resolved) findings; `after` applies the batch moves on top of each
+ * finding's acknowledged owner. Batch findings that stay put remain under
+ * their live owner even when that owner drifted (the conflict panel blocks
+ * the commit in that case). Resolved findings never count toward load.
  */
 export function previewWorkload(state: WorkspaceState, draft: AllocationPlan): WorkloadPreview {
   const zones = zoneNames(state.zones);
-  const active = state.issues.filter(isActiveIssue);
   const conflicts = detectConflicts(draft.items, state.issues);
   const targetConflicts = validateTargets(draft.items);
   const moves = movesOf(draft.items).map((item) => ({ ...item, targetOwner: item.targetOwner.trim() }));
 
+  const beforeIssues = state.issues.filter(isActiveIssue);
   const moveByIssue = new Map(moves.map((move) => [move.issueId, move]));
-  const beforeIssues = active;
-  const afterIssues = active.map((issue) => {
+  const afterIssues = beforeIssues.map((issue) => {
     const move = moveByIssue.get(issue.id);
     return move ? { ...issue, owner: move.targetOwner } : issue;
   });
@@ -301,10 +303,12 @@ export function ownerOptions(state: WorkspaceState, draft: AllocationPlan): stri
 }
 
 /**
- * Greedy fair balancer: unassigned selected findings are handed to the owner
- * with the lowest projected severity weight (ties: lowest count, then name).
- * Resolved findings never move. Current assignments stay where they are when
- * they remain the optimal choice.
+ * Fair balancer. Every selected finding starts on its acknowledged owner; the
+ * algorithm then repeatedly moves a finding from the heaviest-loaded owner to
+ * the lightest one, but only when the move actually shrinks the weight spread.
+ * It stops at spread ≤ 1 or when no remaining move helps, so an already fair
+ * desk is never disturbed. Resolved findings never move. Ties resolve
+ * deterministically by owner name, finding weight, and title.
  */
 export function rebalanceDraft(state: WorkspaceState, draft: AllocationPlan): AllocationPlan {
   const candidates = draft.items.filter((item) => item.ackStatus !== 'resolved');
@@ -315,34 +319,56 @@ export function rebalanceDraft(state: WorkspaceState, draft: AllocationPlan): Al
   if (pool.size < 2) return draft;
 
   const load = new Map<string, { weight: number; count: number }>();
-  [...pool].forEach((owner) => load.set(owner, { weight: 0, count: 0 }));
+  [...pool].sort((a, b) => a.localeCompare(b)).forEach((owner) => load.set(owner, { weight: 0, count: 0 }));
+  const credit = (owner: string, weight: number, delta: 1 | -1) => {
+    const entry = load.get(owner);
+    if (entry) { entry.weight += weight * delta; entry.count += delta; }
+  };
   state.issues
     .filter(isActiveIssue)
     .filter((issue) => !draft.items.some((item) => item.issueId === issue.id))
-    .forEach((issue) => {
-      const entry = load.get(issue.owner);
-      if (entry) { entry.weight += issueWeight(issue); entry.count += 1; }
-    });
+    .forEach((issue) => credit(issue.owner, issueWeight(issue), 1));
+  const assignment = new Map(candidates.map((item) => [item.issueId, item.ackOwner]));
+  candidates.forEach((item) => credit(item.ackOwner, issueWeight(item), 1));
 
-  const ranked = [...candidates].sort((a, b) => {
-    const weightGap = issueWeight(b) - issueWeight(a);
-    return weightGap !== 0 ? weightGap : a.title.localeCompare(b.title);
-  });
-  const targets = new Map<string, string>();
-  for (const item of ranked) {
-    const winner = [...load.entries()].sort(([, a], [, b]) => {
-      if (a.weight !== b.weight) return a.weight - b.weight;
-      return a.count - b.count;
-    })[0][0];
-    targets.set(item.issueId, winner);
-    const entry = load.get(winner);
-    if (entry) { entry.weight += issueWeight(item); entry.count += 1; }
+  const spreadOf = () => {
+    const weights = [...load.values()].map((entry) => entry.weight);
+    return Math.max(...weights) - Math.min(...weights);
+  };
+
+  for (let guard = 0; guard < candidates.length * 2; guard += 1) {
+    const spread = spreadOf();
+    if (spread <= 1) break;
+    const rankedOwners = [...load.entries()].sort(([aName, a], [bName, b]) =>
+      (b.weight - a.weight) || (b.count - a.count) || aName.localeCompare(bName));
+    const heaviest = rankedOwners[0][0];
+    const lightest = rankedOwners[rankedOwners.length - 1][0];
+
+    let best: { item: AllocationItem; spread: number } | null = null;
+    for (const item of candidates) {
+      if (assignment.get(item.issueId) !== heaviest) continue;
+      const weight = issueWeight(item);
+      credit(heaviest, weight, -1);
+      credit(lightest, weight, 1);
+      const nextSpread = spreadOf();
+      credit(lightest, weight, -1);
+      credit(heaviest, weight, 1);
+      if (nextSpread < spread && (!best || nextSpread < best.spread
+        || (nextSpread === best.spread && (weight > issueWeight(best.item) || (weight === issueWeight(best.item) && item.title.localeCompare(best.item.title) < 0))))) {
+        best = { item, spread: nextSpread };
+      }
+    }
+    if (!best) break;
+    const weight = issueWeight(best.item);
+    credit(heaviest, weight, -1);
+    credit(lightest, weight, 1);
+    assignment.set(best.item.issueId, lightest);
   }
 
   return {
     ...draft,
     items: draft.items.map((item) => {
-      const target = targets.get(item.issueId);
+      const target = assignment.get(item.issueId);
       return target ? { ...item, targetOwner: target } : item;
     }),
   };
@@ -353,10 +379,15 @@ function bumpIssue(issue: ReviewIssue, owner: string, atIso: string): ReviewIssu
 }
 
 /**
- * Atomic commit. Nothing is written unless every selected finding still
- * matches its base snapshot (and has a named target). A repeated commit of
- * the same plan id is recognized as a duplicate confirmation and returns the
- * unchanged state, so double clicks or retries can never double-allocate.
+ * Atomic commit against a state read straight from shared storage. Nothing is
+ * written unless every selected finding still matches its acknowledged
+ * baseline (and has a named target); the whole batch is rejected otherwise.
+ *
+ * Issues and the complete audit trail are produced in the same returned state
+ * so callers persist them in one storage write. The audit log is never
+ * truncated here. A repeated commit of the same plan id is recognized as a
+ * duplicate confirmation and returns the state untouched, so double clicks or
+ * retries can never double-allocate.
  */
 export function commitAllocation(
   state: WorkspaceState,
@@ -400,7 +431,8 @@ export function commitAllocation(
     state: {
       ...state,
       issues,
-      assignmentLog: [...state.assignmentLog, ...audit].slice(-50),
+      // Complete history: append without dropping any prior entries.
+      assignmentLog: [...state.assignmentLog, ...audit],
     },
     audit,
     duplicate: false,

@@ -41,6 +41,20 @@ export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage):
   }
 }
 
+/**
+ * Read the shared workspace straight from storage for an allocation commit.
+ * Returns null when nothing is persisted or the payload cannot be parsed; the
+ * caller then falls back to its in-memory state.
+ */
+export function loadStoredWorkspace(storage: Pick<Storage, 'getItem'> = localStorage): WorkspaceState | null {
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    return raw ? parseWorkspaceJson(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function saveWorkspace(state: WorkspaceState, storage: Pick<Storage, 'setItem'> = localStorage): boolean {
   try {
     storage.setItem(STORAGE_KEY, JSON.stringify(state));

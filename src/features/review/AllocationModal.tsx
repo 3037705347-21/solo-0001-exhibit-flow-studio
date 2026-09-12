@@ -1,5 +1,5 @@
 import { ArrowRight, CheckCircle2, RefreshCw, Scale, Send, ShieldAlert, XCircle } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { Modal } from '../../components/Modal';
@@ -35,6 +35,7 @@ const SEVERITY_TONE = { critical: 'danger', warning: 'warning', note: 'neutral' 
 
 export function AllocationModal({ state, draft, onDraftChange, onClose, onApplied }: AllocationModalProps) {
   const { commitAllocationPlan } = useWorkspace();
+  const [pending, setPending] = useState(false);
 
   const zones = useMemo(() => new Map(state.zones.map((zone) => [zone.id, zone.shortLabel || zone.name])), [state.zones]);
   const preview = useMemo(() => previewWorkload(state, draft), [state, draft]);
@@ -49,8 +50,10 @@ export function AllocationModal({ state, draft, onDraftChange, onClose, onApplie
 
   const refresh = () => onDraftChange(refreshAllocationDraft(draft, state));
   const balance = () => onDraftChange(rebalanceDraft(state, draft));
-  const confirm = () => {
-    const result = commitAllocationPlan(draft);
+  const confirm = async () => {
+    setPending(true);
+    const result = await commitAllocationPlan(draft);
+    setPending(false);
     if (!result.ok) {
       onDraftChange(refreshAllocationDraft(draft, state));
       onApplied(result.message ?? 'The batch could not be applied.', 'warning');
@@ -71,10 +74,10 @@ export function AllocationModal({ state, draft, onDraftChange, onClose, onApplie
     title={`Reassign ${draft.items.length} finding${draft.items.length === 1 ? '' : 's'}`}
     onClose={onClose}
     footer={<>
-      <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      <Button variant="secondary" icon={<RefreshCw size={15} />} onClick={refresh}>Refresh base</Button>
-      <Button variant="primary" icon={<Send size={15} />} disabled={blocked} onClick={confirm}>
-        Confirm {moveCount} reassign{moveCount === 1 ? '' : 's'}
+      <Button variant="ghost" disabled={pending} onClick={onClose}>Cancel</Button>
+      <Button variant="secondary" icon={<RefreshCw size={15} />} disabled={pending} onClick={refresh}>Refresh base</Button>
+      <Button variant="primary" icon={<Send size={15} />} disabled={blocked || pending} onClick={confirm}>
+        {pending ? 'Committing transaction…' : `Confirm ${moveCount} reassign${moveCount === 1 ? '' : 's'}`}
       </Button>
     </>}>
     <div className="allocation-stack">

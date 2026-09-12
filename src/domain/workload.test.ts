@@ -121,6 +121,43 @@ describe('rebalanceDraft', () => {
     expect(resolved.targetOwner).toBe('Mara');
   });
 
+  it('leaves an already fair desk untouched instead of shuffling findings', () => {
+    const state = stateWith([
+      makeIssue({ id: 'a', owner: 'Mara', severity: 'critical', status: 'open' }),
+      makeIssue({ id: 'b', owner: 'Theo', severity: 'warning', status: 'open' }),
+    ]);
+    const draft = createAllocationDraft(state.issues, ['a', 'b']);
+    const balanced = rebalanceDraft(state, draft);
+    expect(balanced.items.map((item) => item.targetOwner)).toEqual(draft.items.map((item) => item.ackOwner));
+    expect(previewWorkload(state, balanced).balanced).toBe(true);
+  });
+
+  it('moves only findings that reduce the weight spread', () => {
+    const state = stateWith([
+      makeIssue({ id: 'a', owner: 'Mara', severity: 'warning', status: 'open' }),
+      makeIssue({ id: 'b', owner: 'Mara', severity: 'note', status: 'open' }),
+      makeIssue({ id: 'c', owner: 'Theo', severity: 'critical', status: 'open' }),
+    ]);
+    // Mara 3, Theo 3 — already fair; nothing should move.
+    const fairDraft = createAllocationDraft(state.issues, ['a', 'b', 'c']);
+    const fairResult = rebalanceDraft(state, fairDraft);
+    expect(fairResult.items.map((item) => [item.issueId, item.targetOwner])).toEqual(
+      fairDraft.items.map((item) => [item.issueId, item.ackOwner]),
+    );
+
+    const skewed = stateWith([
+      makeIssue({ id: 'a', owner: 'Mara', severity: 'critical', status: 'open' }),
+      makeIssue({ id: 'b', owner: 'Mara', severity: 'warning', status: 'open' }),
+      makeIssue({ id: 'c', owner: 'Theo', severity: 'note', status: 'open' }),
+    ]);
+    const balanced = rebalanceDraft(skewed, createAllocationDraft(skewed.issues, ['a', 'b', 'c']));
+    const preview = previewWorkload(skewed, balanced);
+    expect(preview.balanced).toBe(true);
+    // Only the warning needs to travel; moving the critical would leave 2/4 (worse).
+    expect(balanced.items.find((item) => item.issueId === 'b')!.targetOwner).toBe('Theo');
+    expect(balanced.items.find((item) => item.issueId === 'a')!.targetOwner).toBe('Mara');
+  });
+
   it('does nothing when only one owner exists', () => {
     const state = stateWith([
       makeIssue({ id: 'a', owner: 'Solo', severity: 'critical', status: 'open' }),
@@ -289,6 +326,30 @@ describe('commitAllocation', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.audit).toEqual([]);
+  });
+
+  it('appends to the complete audit trail without truncating prior entries', () => {
+    const prior = Array.from({ length: 75 }, (_, index) => ({
+      id: `audit-old-${index}`,
+      planId: `plan-old-${index}`,
+      issueId: `issue-old-${index}`,
+      issueTitle: `Old finding ${index}`,
+      fromOwner: 'Mara',
+      toOwner: 'Theo',
+      fromStatus: 'open' as const,
+      toStatus: 'open' as const,
+      timestamp: '2026-09-01T00:00:00.000Z',
+    }));
+    const state: WorkspaceState = {
+      ...stateWith([makeIssue({ id: 'a', owner: 'Mara', severity: 'note', status: 'open' })]),
+      assignmentLog: prior,
+    };
+    const draft = setDraftTarget(createAllocationDraft(state.issues, ['a']), 'a', 'Theo');
+    const result = commitAllocation(state, draft);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.assignmentLog).toHaveLength(76);
+    expect(result.state.assignmentLog.slice(0, 75)).toEqual(prior);
   });
 });
 

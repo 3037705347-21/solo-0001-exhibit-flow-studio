@@ -1,5 +1,4 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
-import { commitAllocation } from '../domain/workload';
 import type { AssignmentAuditEntry, WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -87,22 +86,20 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
             : issue,
         ),
       }));
-    case 'issues/reassignBatch': {
-      // The command layer validates first; this is the atomic write boundary.
-      // A repeated plan id or any version mismatch leaves state untouched.
-      const result = commitAllocation(state, action.plan);
-      if (!result.ok) return state;
-      if (result.duplicate) return state;
-      return stamp(result.state);
-    }
+    case 'allocation/committed':
+      // The command layer performed the cross-tab atomic transaction: it
+      // re-read shared storage under a mutex, validated every base version,
+      // wrote the result, and hands us the authoritative state. Do not stamp
+      // again — re-saving would clobber a peer commit that raced the lock.
+      return action.state;
     case 'workspace/syncExternal': {
-      // Merge the audit trail of an external commit so a peer's reassignment
-      // is never missing from local history, while external state wins.
+      // Another tab won the allocation lock and committed. Adopt its state and
+      // merge any audit entries missing locally; the full trail is retained.
       const known = new Set(state.assignmentLog.map((entry) => entry.id));
       const mergedAudit: AssignmentAuditEntry[] = [
         ...state.assignmentLog,
         ...action.audit.filter((entry) => !known.has(entry.id)),
-      ].slice(-50);
+      ];
       // Keep the external save timestamp so echoing the same content back to
       // storage does not ping-pong storage events between tabs.
       return { ...action.state, assignmentLog: mergedAudit };

@@ -1,4 +1,3 @@
-import type { AllocationPlan } from '../domain/workload';
 import type { Artifact, AssignmentAuditEntry, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
 
 export type WorkspaceAction =
@@ -9,7 +8,7 @@ export type WorkspaceAction =
   | { type: 'placement/reorder'; zoneId: string; artifactId: string; direction: -1 | 1 }
   | { type: 'issue/add'; issue: ReviewIssue }
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
-  | { type: 'issues/reassignBatch'; plan: AllocationPlan }
+  | { type: 'allocation/committed'; state: WorkspaceState; movedCount: number; duplicate: boolean }
   | { type: 'workspace/syncExternal'; state: WorkspaceState; audit: AssignmentAuditEntry[] }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
