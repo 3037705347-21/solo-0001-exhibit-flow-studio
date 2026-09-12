@@ -237,6 +237,7 @@ export function createSeedWorkspace(): WorkspaceState {
         zoneId: 'zone-after',
         artifactId: 'artifact-tape',
         owner: 'Mara Chen',
+        version: 2,
         createdAt: '2026-08-20T10:00:00.000Z',
         updatedAt: '2026-09-01T14:30:00.000Z',
       },
@@ -248,6 +249,7 @@ export function createSeedWorkspace(): WorkspaceState {
         status: 'open',
         zoneId: 'zone-arrival',
         owner: 'Theo James',
+        version: 0,
         createdAt: '2026-08-23T12:00:00.000Z',
         updatedAt: '2026-08-23T12:00:00.000Z',
       },
@@ -260,6 +262,7 @@ export function createSeedWorkspace(): WorkspaceState {
         zoneId: 'zone-common',
         artifactId: 'artifact-quilt',
         owner: 'Rina Solberg',
+        version: 1,
         createdAt: '2026-08-18T09:00:00.000Z',
         updatedAt: '2026-08-28T16:00:00.000Z',
         resolvedAt: '2026-08-28T16:00:00.000Z',
@@ -270,6 +273,7 @@ export function createSeedWorkspace(): WorkspaceState {
       accessibilityPriority: 70,
       groupSize: 6,
     },
+    assignmentLog: [],
     lastSavedAt: '2026-09-01T14:30:00.000Z',
   };
 }

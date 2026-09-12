@@ -17,6 +17,14 @@ export function describeAction(action: WorkspaceAction): string {
     case 'placement/reorder': return `Changed object sequence`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
+    case 'issues/reassignBatch': {
+      const moved = action.plan.items.filter((item) => item.targetOwner.trim() && item.targetOwner !== item.ackOwner);
+      return `Reassigned ${moved.length} finding${moved.length === 1 ? '' : 's'} in one batch`;
+    }
+    case 'workspace/syncExternal':
+      return action.audit.length
+        ? `Applied ${action.audit.length} reassignment${action.audit.length === 1 ? '' : 's'} from another session`
+        : 'Synced changes from another session';
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
     case 'workspace/reset': return 'Reset workspace to sample plan';

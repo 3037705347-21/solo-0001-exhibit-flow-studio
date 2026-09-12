@@ -1,5 +1,6 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
-import type { WorkspaceState } from '../domain/models';
+import { commitAllocation } from '../domain/workload';
+import type { AssignmentAuditEntry, WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
 function stamp(state: WorkspaceState): WorkspaceState {
@@ -81,9 +82,31 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject({
         ...state,
         issues: state.issues.map((issue) =>
-          issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
+          issue.id === action.issueId
+            ? { ...transitionIssue(issue, action.status, action.at), version: issue.version + 1 }
+            : issue,
         ),
       }));
+    case 'issues/reassignBatch': {
+      // The command layer validates first; this is the atomic write boundary.
+      // A repeated plan id or any version mismatch leaves state untouched.
+      const result = commitAllocation(state, action.plan);
+      if (!result.ok) return state;
+      if (result.duplicate) return state;
+      return stamp(result.state);
+    }
+    case 'workspace/syncExternal': {
+      // Merge the audit trail of an external commit so a peer's reassignment
+      // is never missing from local history, while external state wins.
+      const known = new Set(state.assignmentLog.map((entry) => entry.id));
+      const mergedAudit: AssignmentAuditEntry[] = [
+        ...state.assignmentLog,
+        ...action.audit.filter((entry) => !known.has(entry.id)),
+      ].slice(-50);
+      // Keep the external save timestamp so echoing the same content back to
+      // storage does not ping-pong storage events between tabs.
+      return { ...action.state, assignmentLog: mergedAudit };
+    }
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
     case 'project/readiness':

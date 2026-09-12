@@ -24,13 +24,18 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     && Boolean(candidate.preferences);
 }
 
+/** Parse, migrate, and reference-check a serialized workspace. Returns null if it cannot be used. */
+export function parseWorkspaceJson(raw: string): WorkspaceState | null {
+  const migrated = migrateWorkspace(JSON.parse(raw));
+  if (!migrated || !isWorkspaceState(migrated)) return null;
+  return validateReferences(migrated);
+}
+
 export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage): WorkspaceState {
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return createSeedWorkspace();
-    const parsed: unknown = JSON.parse(raw);
-    const migrated = migrateWorkspace(parsed);
-    return migrated && isWorkspaceState(migrated) ? validateReferences(migrated) : createSeedWorkspace();
+    return parseWorkspaceJson(raw) ?? createSeedWorkspace();
   } catch {
     return createSeedWorkspace();
   }

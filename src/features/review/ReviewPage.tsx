@@ -1,5 +1,6 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, Users, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { AllocationModal } from './AllocationModal';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -11,6 +12,8 @@ import { downloadTextFile } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
 import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
 import { analyzeJourney } from '../../domain/journeyAnalysis';
+import type { AllocationPlan } from '../../domain/workload';
+import { createAllocationDraft } from '../../domain/workload';
 import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
 import { evaluateReadiness } from '../../domain/reviewRules';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
@@ -26,12 +29,27 @@ export function ReviewPage() {
   const [showModal, setShowModal] = useState(false);
   const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
   const [toast, setToast] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<'positive' | 'warning'>('positive');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [allocationDraft, setAllocationDraft] = useState<AllocationPlan | null>(null);
 
   useEffect(() => { saveReviewUi(reviewUi); }, [reviewUi]);
   const setZoneId = (zoneId: string) => setReviewUi((ui) => ({ ...ui, zoneId }));
   const setStatus = (status: StatusFilter) => setReviewUi((ui) => ({ ...ui, status }));
 
-  const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 2600); };
+  const notify = (message: string, tone: 'positive' | 'warning' = 'positive') => {
+    setToast(message);
+    setToastTone(tone);
+    window.setTimeout(() => setToast(null), 2600);
+  };
+
+  const toggleSelected = (issueId: string) => setSelectedIds((ids) =>
+    ids.includes(issueId) ? ids.filter((id) => id !== issueId) : [...ids, issueId]);
+  const selectedIssues = state.issues.filter((issue) => selectedIds.includes(issue.id));
+  const openAllocation = () => {
+    if (selectedIssues.length === 0) return;
+    setAllocationDraft(createAllocationDraft(state.issues, selectedIds));
+  };
 
   const zones = useMemo(() => sortZones(state.zones), [state.zones]);
   const selectedZone = zones.find((zone) => zone.id === reviewUi.zoneId);
@@ -70,12 +88,13 @@ export function ReviewPage() {
     {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
-    <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
+    <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div><Button variant="secondary" icon={<Users size={15} />} disabled={selectedIds.length === 0} onClick={openAllocation}>Allocate workload{selectedIds.length > 0 ? ` (${selectedIds.length})` : ''}</Button></div>
     {checklist && <ZoneChecklistCard checklist={checklist} onDownload={exportChecklist} />}
-    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
+    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} selected={selectedIds.includes(issue.id)} onToggleSelect={() => toggleSelected(issue.id)} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
-    {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
+    {allocationDraft && <AllocationModal state={state} draft={allocationDraft} onDraftChange={setAllocationDraft} onClose={() => { setAllocationDraft(null); setSelectedIds([]); }} onApplied={(message, tone) => notify(message, tone)} />}
+    {toast && <div className={`toast ${toastTone === 'positive' ? 'toast-positive' : 'toast-warning'}`}>{toastTone === 'positive' ? <Download size={16} /> : <AlertCircle size={16} />}{toast}</div>}
   </div>;
 }
 
@@ -93,12 +112,12 @@ function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<R
   </section>;
 }
 
-function IssueRow({ issue, onTransition }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
+function IssueRow({ issue, selected, onToggleSelect, onTransition }: { issue: ReviewIssue; selected: boolean; onToggleSelect: () => void; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
   const [error, setError] = useState<string | null>(null);
   const next = issue.status === 'open' ? 'in-progress' : issue.status === 'in-progress' ? 'resolved' : 'in-progress';
   const resultLabel = issue.status === 'open' ? 'Start work' : issue.status === 'in-progress' ? 'Resolve' : 'Reopen';
   const result = () => { const response = onTransition(next); if (!response.ok) { setError(response.message ?? 'Transition failed.'); window.setTimeout(() => setError(null), 2500); } };
-  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
+  return <article className={`issue-row issue-${issue.severity} ${selected ? 'is-selected' : ''}`}><input className="issue-select" type="checkbox" aria-label={`Select ${issue.title} for workload allocation`} checked={selected} onChange={onToggleSelect} /><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge><em className="issue-version">v{issue.version}</em></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
 }
 
 function IssueEditor({ state, onClose, onSave }: { state: ReturnType<typeof useWorkspace>['state']; onClose: () => void; onSave: (draft: IssueDraft) => { ok: boolean; errors?: Record<string, string> } }) {

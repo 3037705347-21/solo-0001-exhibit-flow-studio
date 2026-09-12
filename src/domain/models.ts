@@ -56,9 +56,24 @@ export interface ReviewIssue {
   zoneId?: string;
   artifactId?: string;
   owner: string;
+  /** Optimistic-concurrency version; bumped on every owner or status change. */
+  version: number;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+
+/** One owner transfer inside a workload allocation transaction. Status never changes. */
+export interface AssignmentAuditEntry {
+  id: string;
+  planId: string;
+  issueId: string;
+  issueTitle: string;
+  fromOwner: string;
+  toOwner: string;
+  fromStatus: IssueStatus;
+  toStatus: IssueStatus;
+  timestamp: string;
 }
 
 export interface PlanningPreferences {
@@ -84,6 +99,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  assignmentLog: AssignmentAuditEntry[];
   lastSavedAt?: string;
 }
 

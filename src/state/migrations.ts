@@ -14,13 +14,29 @@ interface LegacyZone {
   artifactIds: string[];
 }
 
+interface LegacyIssue {
+  id: string;
+  title: string;
+  description: string;
+  severity: WorkspaceState['issues'][number]['severity'];
+  status: WorkspaceState['issues'][number]['status'];
+  zoneId?: string;
+  artifactId?: string;
+  owner: string;
+  version?: number;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+}
+
 interface LegacyWorkspace {
   version?: number;
   project?: WorkspaceState['project'];
   artifacts?: WorkspaceState['artifacts'];
   zones?: LegacyZone[];
-  issues?: WorkspaceState['issues'];
+  issues?: LegacyIssue[];
   preferences?: WorkspaceState['preferences'];
+  assignmentLog?: WorkspaceState['assignmentLog'];
   lastSavedAt?: string;
 }
 
@@ -37,8 +53,10 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     project: source.project,
     artifacts: source.artifacts,
     zones,
-    issues: source.issues,
+    // Issues persisted before workload transactions start at version 0.
+    issues: source.issues.map((issue) => ({ ...issue, version: typeof issue.version === 'number' ? issue.version : 0 })),
     preferences: source.preferences,
+    assignmentLog: source.assignmentLog ?? [],
     lastSavedAt: source.lastSavedAt,
   };
 }
