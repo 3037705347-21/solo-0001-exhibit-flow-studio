@@ -1,4 +1,4 @@
-import type { WorkspaceState } from '../domain/models';
+import type { ScenarioRecord, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
   id: string;
@@ -21,7 +21,35 @@ interface LegacyWorkspace {
   zones?: LegacyZone[];
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
+  scenarioRecords?: unknown;
   lastSavedAt?: string;
+}
+
+function sanitizeScenarioRecords(value: unknown): ScenarioRecord[] {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  const records: ScenarioRecord[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as Partial<ScenarioRecord>;
+    if (
+      typeof candidate.id !== 'string'
+      || typeof candidate.name !== 'string'
+      || !candidate.input
+      || typeof candidate.planVersion !== 'string'
+      || !candidate.planBasis
+      || !candidate.projection
+      || typeof candidate.createdAt !== 'string'
+    ) {
+      continue;
+    }
+    if (seenIds.has(candidate.id) || seenNames.has(candidate.name.toLowerCase())) continue;
+    seenIds.add(candidate.id);
+    seenNames.add(candidate.name.toLowerCase());
+    records.push(candidate as ScenarioRecord);
+  }
+  return records;
 }
 
 export function migrateWorkspace(value: unknown): WorkspaceState | null {
@@ -39,6 +67,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     zones,
     issues: source.issues,
     preferences: source.preferences,
+    scenarioRecords: sanitizeScenarioRecords(source.scenarioRecords),
     lastSavedAt: source.lastSavedAt,
   };
 }

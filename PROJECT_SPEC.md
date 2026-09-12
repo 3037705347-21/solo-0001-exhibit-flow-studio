@@ -39,6 +39,8 @@ The user opens the review view, creates a finding linked to an object or zone, m
 
 The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
 
+The user can also save named, immutable comparison records. Each record freezes the scenario inputs, the plan version (a fingerprint of the object set and sequenced placements), the projected outcomes, and the recommendations that justify them. Saved records are listed for side-by-side replay: the frozen outcome is shown against the same inputs replayed on the current plan. When the plan has changed since a record was saved, the record stays openable but is marked "basis changed"; its stored result is never automatically replaced. Record names are unique and identical inputs on the same plan version cannot be saved twice; deletion requires confirmation.
+
 ## State and rules
 
 - Project state transitions are `draft -> review -> ready`; readiness can regress to `review` whenever a blocking change is introduced.
@@ -50,6 +52,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
+- Saved scenario comparisons are immutable: they pin the inputs, plan version, outcomes, and recommendations, are unique by name (case-insensitive) and by inputs-plus-plan-version, and survive plan changes as explicitly marked stale records rather than being overwritten.
 
 ## Modules and dependency direction
 

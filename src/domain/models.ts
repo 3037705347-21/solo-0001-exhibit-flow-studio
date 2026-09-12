@@ -84,6 +84,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  scenarioRecords: ScenarioRecord[];
   lastSavedAt?: string;
 }
 
@@ -164,6 +165,31 @@ export interface ScenarioInput {
   pace: PlanningPreferences['pace'];
   accessibilityPriority: number;
   groupSize: number;
+}
+
+/**
+ * Immutable, replayable comparison record. Everything needed to open the
+ * record later — inputs, the plan version it was derived from, the frozen
+ * projection and the human-readable plan basis — is captured at save time.
+ * Records are never mutated in place; the stored projection stays valid for
+ * the captured `planVersion`, even when the current plan has moved on.
+ */
+export interface ScenarioRecord {
+  id: string;
+  name: string;
+  input: ScenarioInput;
+  planVersion: string;
+  planBasis: PlanBasis;
+  projection: ScenarioProjection;
+  createdAt: string;
+}
+
+/** Compact, human-readable summary of the plan a record was calculated on. */
+export interface PlanBasis {
+  artifactCount: number;
+  zoneCount: number;
+  placedCount: number;
+  totalDwellMinutes: number;
 }
 
 export interface ScenarioProjection {

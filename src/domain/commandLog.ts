@@ -18,6 +18,8 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/add': return `Created finding ${action.issue.title}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
+    case 'scenarioRecord/save': return `Saved scenario comparison ${action.record.name}`;
+    case 'scenarioRecord/remove': return 'Deleted scenario comparison';
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }

@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { findDuplicateScenarioRecord } from '../domain/scenarioRecords';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -86,6 +87,29 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       }));
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
+    case 'scenarioRecord/save': {
+      const { record } = action;
+      if (state.scenarioRecords.some((existing) => existing.id === record.id)) {
+        throw new Error('This comparison was already saved.');
+      }
+      if (state.scenarioRecords.some((existing) => existing.name.toLowerCase() === record.name.toLowerCase())) {
+        throw new Error('A comparison with this name already exists.');
+      }
+      const duplicate = findDuplicateScenarioRecord(state.scenarioRecords, record.input, record.planVersion);
+      if (duplicate) {
+        throw new Error(`These inputs are already saved as “${duplicate.name}”.`);
+      }
+      return stamp({ ...state, scenarioRecords: [...state.scenarioRecords, record] });
+    }
+    case 'scenarioRecord/remove': {
+      if (!state.scenarioRecords.some((record) => record.id === action.recordId)) {
+        return state;
+      }
+      return stamp({
+        ...state,
+        scenarioRecords: state.scenarioRecords.filter((record) => record.id !== action.recordId),
+      });
+    }
     case 'project/readiness':
       return stamp({
         ...state,

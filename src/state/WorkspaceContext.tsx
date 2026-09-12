@@ -3,7 +3,8 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ScenarioInput, ScenarioRecord, Snapshot, WorkspaceState } from '../domain/models';
+import { createScenarioRecord } from '../domain/scenarioRecords';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -26,6 +27,8 @@ interface WorkspaceContextValue {
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
+  saveScenarioRecord: (name: string, input: ScenarioInput) => CommandResult<ScenarioRecord>;
+  removeScenarioRecord: (recordId: string) => CommandResult;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
@@ -122,6 +125,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'preferences/update', preferences });
   }, []);
 
+  const saveScenarioRecord = useCallback((name: string, input: ScenarioInput): CommandResult<ScenarioRecord> => {
+    const built = createScenarioRecord(state, { name, input }, () => createId('scenario'));
+    if (!built.record) {
+      return {
+        ok: false,
+        errors: Object.fromEntries(built.errors.map((error) => [error.field, error.message])),
+        message: built.errors[0]?.message ?? 'The comparison could not be saved.',
+      };
+    }
+    try {
+      dispatch({ type: 'scenarioRecord/save', record: built.record });
+      return { ok: true, value: built.record };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'The comparison could not be saved.' };
+    }
+  }, [state]);
+
+  const removeScenarioRecord = useCallback((recordId: string): CommandResult => {
+    if (!state.scenarioRecords.some((record) => record.id === recordId)) {
+      return { ok: false, message: 'This comparison no longer exists.' };
+    }
+    dispatch({ type: 'scenarioRecord/remove', recordId });
+    return { ok: true };
+  }, [state.scenarioRecords]);
+
   const checkReadiness = useCallback(() => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const result = evaluateReadiness(state, analysis);
@@ -149,10 +177,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     addIssue,
     transitionReviewIssue,
     updatePreferences,
+    saveScenarioRecord,
+    removeScenarioRecord,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, saveScenarioRecord, removeScenarioRecord, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

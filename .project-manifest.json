@@ -50,10 +50,10 @@
       "id": "compare-scenarios",
       "name": "Compare planning scenarios",
       "entry": "browser route /insights",
-      "steps": ["adjust pace and accessibility controls", "derive a non-mutating projection", "apply selected planning preferences explicitly"],
-      "success": "projection metrics update and applied preferences persist",
-      "failure": "out-of-range inputs are constrained and baseline state remains intact",
-      "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
+      "steps": ["adjust pace and accessibility controls", "derive a non-mutating projection", "save a named immutable comparison pinned to a plan version", "replay saved comparisons side by side and delete them with confirmation", "apply selected planning preferences explicitly"],
+      "success": "projection metrics update, comparisons persist across reload, and plan changes mark old records basis-changed without replacing their results",
+      "failure": "out-of-range inputs are constrained, duplicate names and duplicate inputs are rejected, the baseline plan stays intact, and deletion requires confirmation",
+      "verification": "Playwright changes scenario controls, saves and replays comparisons, changes the plan, attempts duplicate names, deletes a record, and reloads to verify persistence",
       "module_ids": ["app", "insights", "state", "domain", "components"]
     }
   ]
