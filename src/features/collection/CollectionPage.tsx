@@ -1,9 +1,12 @@
 import { Filter, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ArtifactGlyph } from '../../components/ArtifactGlyph';
 import { Badge } from '../../components/Badge';
+import { BlockerContextBanner } from '../../components/BlockerContextBanner';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
+import { InlineNotice } from '../../components/InlineNotice';
 import { Modal } from '../../components/Modal';
 import { SectionHeader } from '../../components/SectionHeader';
 import { SelectField } from '../../components/SelectField';
@@ -24,6 +27,14 @@ export function CollectionPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [editor, setEditor] = useState<{ draft: ArtifactDraft; existing?: Artifact } | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+
+  const focusArtifactId = searchParams.get('artifact');
+  const focusArtifact = focusArtifactId ? state.artifacts.find((artifact) => artifact.id === focusArtifactId) : undefined;
+  useEffect(() => {
+    if (!focusArtifact) return;
+    document.getElementById(`collection-artifact-${focusArtifact.id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, [focusArtifact]);
 
   const filtered = useMemo(() => state.artifacts.filter((artifact) => {
     const haystack = `${artifact.title} ${artifact.maker} ${artifact.accessionId} ${artifact.tags.join(' ')}`.toLowerCase();
@@ -40,17 +51,19 @@ export function CollectionPage() {
   };
 
   return <div className="page-stack"><SectionHeader eyebrow="OBJECT LIBRARY" title="Collection" description="Shape the cast of objects before you ask them to carry a story." actions={<Button variant="primary" icon={<Plus size={17} />} onClick={() => setEditor({ draft: emptyArtifactDraft })}>Add object</Button>} />
+    <BlockerContextBanner />
+    {focusArtifactId && !focusArtifact && <InlineNotice tone="warning" message="The linked object is no longer in the collection. Return to the review desk and re-run the readiness check." />}
     <div className="summary-strip"><div><span className="eyebrow">COLLECTION SIZE</span><strong>{state.artifacts.length}<small> objects</small></strong></div><div><span className="eyebrow">KEY OBJECTS</span><strong>{state.artifacts.filter((artifact) => artifact.isKeyObject).length}<small> flagged</small></strong></div><div><span className="eyebrow">ROLES COVERED</span><strong>{new Set(state.artifacts.map((artifact) => artifact.narrativeRole)).size}<small> of 4</small></strong></div><div><span className="eyebrow">FILTERED VIEW</span><strong>{filtered.length}<small> showing</small></strong></div></div>
     <section className="toolbar"><div className="search-box"><Search size={17} /><input aria-label="Search collection" placeholder="Search title, maker, ID, or tag" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <Button variant="ghost" icon={<X size={15} />} aria-label="Clear search" onClick={() => setQuery('')} />}</div><Button variant={showFilters ? 'primary' : 'secondary'} icon={<SlidersHorizontal size={16} />} onClick={() => setShowFilters((value) => !value)}>Filters</Button><div className="toolbar-count"><Filter size={14} /> {filtered.length} results</div></section>
     {showFilters && <section className="filter-drawer"><SelectField label="Narrative role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="all">All roles</option>{roleOptions.map((role) => <option key={role} value={role}>{titleCase(role)}</option>)}</SelectField><SelectField label="Sensitivity" value={sensitivityFilter} onChange={(event) => setSensitivityFilter(event.target.value)}><option value="all">All sensitivities</option>{sensitivityOptions.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}</SelectField><Button variant="ghost" onClick={() => { setRoleFilter('all'); setSensitivityFilter('all'); }}>Clear filters</Button></section>}
-    {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} onEdit={() => setEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => { if (window.confirm(`Remove ${artifact.title} from the collection?`)) removeArtifact(artifact.id); }} />)}</div>}
+    {filtered.length === 0 ? <EmptyState icon={<Search size={23} />} title="No matching objects" detail="Try a different search or clear the filters." /> : <div className="artifact-grid">{filtered.map((artifact) => <ArtifactCard key={artifact.id} artifact={artifact} highlighted={artifact.id === focusArtifactId} onEdit={() => setEditor({ draft: artifactToDraft(artifact), existing: artifact })} onRemove={() => { if (window.confirm(`Remove ${artifact.title} from the collection?`)) removeArtifact(artifact.id); }} />)}</div>}
     {feedback && <div className="toast toast-positive">{feedback}</div>}
     {editor && <ArtifactEditor initial={editor.draft} existing={editor.existing} onClose={() => setEditor(null)} onSave={handleSave} />}
   </div>;
 }
 
-function ArtifactCard({ artifact, onEdit, onRemove }: { artifact: Artifact; onEdit: () => void; onRemove: () => void }) {
-  return <article className="artifact-card"><div className="artifact-card-top"><ArtifactGlyph color={artifact.color} size="large" /><div className="artifact-actions"><Button variant="ghost" onClick={onEdit}>Edit</Button><Button variant="ghost" onClick={onRemove}>Remove</Button></div></div><div className="artifact-id">{artifact.accessionId}</div><h3>{artifact.title}</h3><p className="artifact-maker">{artifact.maker} · {artifact.yearLabel}</p><p className="artifact-summary">{artifact.summary}</p><div className="tag-row"><Badge tone="info">{titleCase(artifact.narrativeRole)}</Badge><Badge tone={artifact.sensitivity === 'low-light' ? 'warning' : 'neutral'}>{titleCase(artifact.sensitivity)}</Badge>{artifact.isKeyObject && <Badge tone="danger">Key object</Badge>}</div><div className="artifact-card-bottom"><span>{artifact.medium}</span><strong>{artifact.dwellMinutes} min dwell</strong></div></article>;
+function ArtifactCard({ artifact, highlighted, onEdit, onRemove }: { artifact: Artifact; highlighted?: boolean; onEdit: () => void; onRemove: () => void }) {
+  return <article id={`collection-artifact-${artifact.id}`} className={`artifact-card${highlighted ? ' highlighted' : ''}`}><div className="artifact-card-top"><ArtifactGlyph color={artifact.color} size="large" /><div className="artifact-actions"><Button variant="ghost" onClick={onEdit}>Edit</Button><Button variant="ghost" onClick={onRemove}>Remove</Button></div></div><div className="artifact-id">{artifact.accessionId}</div><h3>{artifact.title}</h3><p className="artifact-maker">{artifact.maker} · {artifact.yearLabel}</p><p className="artifact-summary">{artifact.summary}</p><div className="tag-row"><Badge tone="info">{titleCase(artifact.narrativeRole)}</Badge><Badge tone={artifact.sensitivity === 'low-light' ? 'warning' : 'neutral'}>{titleCase(artifact.sensitivity)}</Badge>{artifact.isKeyObject && <Badge tone="danger">Key object</Badge>}</div><div className="artifact-card-bottom"><span>{artifact.medium}</span><strong>{artifact.dwellMinutes} min dwell</strong></div></article>;
 }
 
 function ArtifactEditor({ initial, existing, onClose, onSave }: { initial: ArtifactDraft; existing?: Artifact; onClose: () => void; onSave: (draft: ArtifactDraft, existing?: Artifact) => { ok: boolean; errors?: Record<string, string> } }) {

@@ -15,7 +15,7 @@ export function explainReadiness(result: ReadinessResult, analysis: JourneyAnaly
   if (analysis.roleCoverage === 1) completed.push('The narrative arc covers all four roles.');
   if (issues.length && issues.every((issue) => issue.status === 'resolved')) completed.push('Every review finding is resolved.');
   if (!result.ready) {
-    result.blockers.forEach((blocker) => nextActions.push(blocker));
+    result.blockers.forEach((blocker) => nextActions.push(blocker.message));
     result.cautions.slice(0, 2).forEach((caution) => nextActions.push(caution));
     return { headline: 'A few decisions remain', subhead: 'Resolve the blockers below, then run the check again.', nextActions, completed };
   }

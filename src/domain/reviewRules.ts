@@ -1,7 +1,18 @@
-import type { JourneyAnalysis, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from './models';
+import { collectReadinessFacts } from './readinessTracking';
+import type { JourneyAnalysis, ReadinessBlocker, ReadinessLink, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from './models';
+
+function dedupeLinks(links: ReadinessLink[]): ReadinessLink[] {
+  const seen = new Set<string>();
+  return links.filter((link) => {
+    const key = `${link.kind}:${link.id ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalysis, at = new Date()): ReadinessResult {
-  const blockers: string[] = [];
+  const blockers: ReadinessBlocker[] = [];
   const cautions: string[] = [];
   const unresolvedCritical = state.issues.filter(
     (issue) => issue.severity === 'critical' && issue.status !== 'resolved',
@@ -11,14 +22,50 @@ export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalys
   );
 
   if (analysis.blockingCount > 0) {
-    blockers.push(`${analysis.blockingCount} blocking journey constraint${analysis.blockingCount === 1 ? '' : 's'} remain.`);
+    const errorFindings = analysis.findings.filter((finding) => finding.type === 'error');
+    blockers.push({
+      id: 'journey-constraints',
+      message: `${analysis.blockingCount} blocking journey constraint${analysis.blockingCount === 1 ? ' remains' : 's remain'}.`,
+      links: dedupeLinks(errorFindings.map((finding) => {
+        if (finding.zoneId) {
+          const zone = state.zones.find((candidate) => candidate.id === finding.zoneId);
+          return { kind: 'zone', id: finding.zoneId, label: zone ? `${finding.title} · ${zone.shortLabel}` : finding.title };
+        }
+        if (finding.artifactId) return { kind: 'artifact' as const, id: finding.artifactId, label: finding.title };
+        return { kind: 'journey' as const, label: finding.title };
+      })),
+    });
   }
   if (unresolvedCritical.length > 0) {
-    blockers.push(`${unresolvedCritical.length} critical review finding${unresolvedCritical.length === 1 ? '' : 's'} remain unresolved.`);
+    blockers.push({
+      id: 'critical-findings',
+      message: `${unresolvedCritical.length} critical review finding${unresolvedCritical.length === 1 ? ' remains' : 's remain'} unresolved.`,
+      links: unresolvedCritical.map((issue) => ({ kind: 'issue', id: issue.id, label: issue.title })),
+    });
   }
-  if (analysis.placedCount === 0) blockers.push('The visitor journey has no placed objects.');
-  if (analysis.keyObjectCoverage < 1) blockers.push('Every key object must be placed in the journey.');
-  if (analysis.roleCoverage < 1) blockers.push('The planned journey does not cover every narrative role.');
+  if (analysis.placedCount === 0) {
+    blockers.push({
+      id: 'empty-journey',
+      message: 'The visitor journey has no placed objects.',
+      links: [{ kind: 'journey', label: 'Open the journey planner' }],
+    });
+  }
+  if (analysis.keyObjectCoverage < 1) {
+    const placedIds = new Set(state.zones.flatMap((zone) => zone.artifactIds));
+    const unplacedKeyObjects = state.artifacts.filter((artifact) => artifact.isKeyObject && !placedIds.has(artifact.id));
+    blockers.push({
+      id: 'key-objects',
+      message: 'Every key object must be placed in the journey.',
+      links: dedupeLinks(unplacedKeyObjects.map((artifact) => ({ kind: 'artifact' as const, id: artifact.id, label: artifact.title }))),
+    });
+  }
+  if (analysis.roleCoverage < 1) {
+    blockers.push({
+      id: 'role-coverage',
+      message: 'The planned journey does not cover every narrative role.',
+      links: [{ kind: 'journey', label: 'Adjust placements in the journey planner' }],
+    });
+  }
 
   if (analysis.warningCount > 0) cautions.push(`${analysis.warningCount} journey warning${analysis.warningCount === 1 ? '' : 's'} should be reviewed.`);
   if (unresolvedWarnings.length > 0) cautions.push(`${unresolvedWarnings.length} non-critical review finding${unresolvedWarnings.length === 1 ? '' : 's'} remain open.`);
@@ -34,6 +81,7 @@ export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalys
     blockers,
     cautions,
     checkedAt: at.toISOString(),
+    facts: collectReadinessFacts(state),
   };
 }
 

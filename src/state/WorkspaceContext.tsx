@@ -125,14 +125,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const checkReadiness = useCallback(() => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const result = evaluateReadiness(state, analysis);
-    dispatch({ type: 'project/readiness', ready: result.ready, checkedAt: result.checkedAt });
+    dispatch({ type: 'project/readiness', ready: result.ready, checkedAt: result.checkedAt, result });
     return result;
   }, [state]);
 
   const createSnapshot = useCallback((): CommandResult<Snapshot> => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
     const readiness = evaluateReadiness(state, analysis);
-    if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
+    if (!readiness.ready) return { ok: false, message: readiness.blockers[0]?.message ?? 'The plan is not ready.' };
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 

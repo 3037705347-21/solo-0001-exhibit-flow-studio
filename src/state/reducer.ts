@@ -89,6 +89,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'project/readiness':
       return stamp({
         ...state,
+        readiness: action.result,
         project: {
           ...state.project,
           stage: action.ready ? 'ready' : 'review',

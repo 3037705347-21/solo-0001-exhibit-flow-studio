@@ -1,8 +1,10 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, Link2Off, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
+import { InlineNotice } from '../../components/InlineNotice';
 import { Modal } from '../../components/Modal';
 import { SectionHeader } from '../../components/SectionHeader';
 import { SelectField } from '../../components/SelectField';
@@ -10,9 +12,8 @@ import { TextField } from '../../components/TextField';
 import { downloadTextFile } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
 import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
-import { analyzeJourney } from '../../domain/journeyAnalysis';
-import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
-import { evaluateReadiness } from '../../domain/reviewRules';
+import type { IssueDraft, IssueSeverity, IssueStatus, ReadinessFact, ReadinessLink, ReviewIssue, WorkspaceState } from '../../domain/models';
+import { collectReadinessFacts, diffReadinessFacts, readinessLinkHref, readinessLinkStatus, summarizeDrift } from '../../domain/readinessTracking';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
 import { loadReviewUi, saveReviewUi, type ReviewUiState } from '../../state/persistence';
 import { useWorkspace } from '../../state/WorkspaceContext';
@@ -24,8 +25,8 @@ export function ReviewPage() {
   const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
-  const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
   const [toast, setToast] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
 
   useEffect(() => { saveReviewUi(reviewUi); }, [reviewUi]);
   const setZoneId = (zoneId: string) => setReviewUi((ui) => ({ ...ui, zoneId }));
@@ -36,6 +37,13 @@ export function ReviewPage() {
   const zones = useMemo(() => sortZones(state.zones), [state.zones]);
   const selectedZone = zones.find((zone) => zone.id === reviewUi.zoneId);
   const filter = reviewUi.status;
+
+  // The recorded check and its drift against the live workspace: any module's
+  // edits flip the verdict to stale through the same fact comparison.
+  const readiness = state.readiness ?? null;
+  const currentFacts = useMemo(() => collectReadinessFacts(state), [state]);
+  const drift = useMemo(() => (readiness ? diffReadinessFacts(readiness.facts, currentFacts) : null), [readiness, currentFacts]);
+  const stale = Boolean(drift?.stale);
 
   const scopedIssues = useMemo<ReviewIssue[]>(() => {
     if (!selectedZone) return state.issues;
@@ -52,7 +60,22 @@ export function ReviewPage() {
   const filtered = scopedIssues.filter((issue) => filter === 'all' || issue.status === filter);
   const checklist = selectedZone ? buildZoneChecklist(state, selectedZone.id) : null;
 
-  const runCheck = () => setReadiness(checkReadiness());
+  // Deep-linked finding (?issue=<id>): reveal it even if filters would hide it.
+  const focusIssueId = searchParams.get('issue');
+  const focusIssue = focusIssueId ? state.issues.find((issue) => issue.id === focusIssueId) : undefined;
+  useEffect(() => {
+    if (!focusIssue) return;
+    const hiddenByZone = Boolean(selectedZone)
+      && !(focusIssue.zoneId === selectedZone!.id || (focusIssue.artifactId && selectedZone!.artifactIds.includes(focusIssue.artifactId)));
+    const hiddenByStatus = filter !== 'all' && focusIssue.status !== filter;
+    if (hiddenByZone || hiddenByStatus) setReviewUi((ui) => ({ ...ui, zoneId: '', status: 'all' }));
+  }, [focusIssue, selectedZone, filter]);
+  useEffect(() => {
+    if (!focusIssue) return;
+    document.getElementById(`review-issue-${focusIssue.id}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, [focusIssue, filtered.length]);
+
+  const runCheck = () => { checkReadiness(); };
   const exportSnapshot = () => {
     const result = createSnapshot();
     if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.'); return; }
@@ -66,17 +89,29 @@ export function ReviewPage() {
   };
 
   return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
-    <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
-    {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
+    <section className={`readiness-card ${readiness ? (readiness.ready ? 'ready' : 'blocked') : 'pending'}${stale ? ' stale' : ''}`}><div className="readiness-icon">{!readiness ? <ClipboardCheck size={28} /> : readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{!readiness ? 'Check not run yet' : readiness.ready ? 'Ready to share' : 'Still needs attention'}{stale && <Badge tone="warning">Stale</Badge>}</h2><p>{!readiness ? 'Run the readiness check to score this plan and list exactly what is blocking it.' : readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness ? readiness.score : '—'}</strong><span>readiness score</span></div><div className="readiness-actions">{!readiness && <Button variant="primary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button>}{readiness && stale && <Button variant="primary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check now</Button>}{readiness && !stale && readiness.ready && <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button>}{readiness && !stale && !readiness.ready && <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
+    {stale && drift && <section className="stale-banner" role="alert"><AlertTriangle size={17} /><div><strong>Plan changed since this check.</strong><p>{summarizeDrift(drift, state)} The recorded verdict and blockers below may be out of date — re-check before acting on them.</p></div></section>}
+    {readiness && !readiness.ready && <section className={`blocker-list${stale ? ' stale' : ''}`}><div className="eyebrow">WHAT IS BLOCKING{stale ? ' · RECORDED BEFORE THE LATEST CHANGES' : ''}</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker.id}><XCircle size={16} /><div className="blocker-body"><span>{blocker.message}</span>{blocker.links.length > 0 && <div className="blocker-links">{blocker.links.map((link) => <BlockerLinkChip key={`${link.kind}:${link.id ?? 'global'}`} link={link} blockerId={blocker.id} state={state} currentFacts={currentFacts} />)}</div>}</div></div>)}</section>}
+    {focusIssueId && !focusIssue && <InlineNotice tone="warning" message="The linked finding is no longer available — it may have been removed along with its object. Re-run the readiness check to refresh the blockers." />}
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
     <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
     {checklist && <ZoneChecklistCard checklist={checklist} onDownload={exportChecklist} />}
-    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
+    <section className="issue-list">{filtered.map((issue) => <IssueRow key={issue.id} issue={issue} highlighted={issue.id === focusIssueId} onTransition={(status) => transitionReviewIssue(issue.id, status)} />)}</section>
     {filtered.length === 0 && <EmptyState icon={<MapPin size={26} />} title={selectedZone ? 'No findings in this zone' : 'No findings here'} detail={selectedZone ? 'This zone has no findings matching the current status filter.' : 'No findings match the current status filter.'} />}
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
   </div>;
+}
+
+function BlockerLinkChip({ link, blockerId, state, currentFacts }: { link: ReadinessLink; blockerId: string; state: WorkspaceState; currentFacts: ReadinessFact[] }) {
+  const status = readinessLinkStatus(link, state, currentFacts);
+  if (status === 'missing') {
+    return <span className="blocker-link missing" title="This target was removed after the check."><Link2Off size={12} />{link.label}<em>Removed — re-check</em></span>;
+  }
+  return <Link className={`blocker-link ${status}`} to={readinessLinkHref(link, blockerId)} title={status === 'changed' ? 'This target changed after the check.' : undefined}>
+    {status === 'changed' ? <AlertTriangle size={12} /> : <ArrowRight size={12} />}{link.label}{status === 'changed' && <em>Changed — re-check</em>}
+  </Link>;
 }
 
 function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<ReturnType<typeof buildZoneChecklist>>; onDownload: () => void }) {
@@ -93,12 +128,12 @@ function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<R
   </section>;
 }
 
-function IssueRow({ issue, onTransition }: { issue: ReviewIssue; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
+function IssueRow({ issue, highlighted, onTransition }: { issue: ReviewIssue; highlighted?: boolean; onTransition: (status: ReviewIssue['status']) => { ok: boolean; message?: string } }) {
   const [error, setError] = useState<string | null>(null);
   const next = issue.status === 'open' ? 'in-progress' : issue.status === 'in-progress' ? 'resolved' : 'in-progress';
   const resultLabel = issue.status === 'open' ? 'Start work' : issue.status === 'in-progress' ? 'Resolve' : 'Reopen';
   const result = () => { const response = onTransition(next); if (!response.ok) { setError(response.message ?? 'Transition failed.'); window.setTimeout(() => setError(null), 2500); } };
-  return <article className={`issue-row issue-${issue.severity}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
+  return <article id={`review-issue-${issue.id}`} className={`issue-row issue-${issue.severity}${highlighted ? ' highlighted' : ''}`}><div className="issue-severity">{issue.severity === 'critical' ? <ShieldAlert size={19} /> : issue.severity === 'warning' ? <AlertCircle size={19} /> : <FileWarning size={19} />}</div><div className="issue-main"><div className="issue-title-line"><h3>{issue.title}</h3><Badge tone={issue.status === 'resolved' ? 'positive' : issue.severity === 'critical' ? 'danger' : issue.severity === 'warning' ? 'warning' : 'neutral'}>{titleCase(issue.status)}</Badge></div><p>{issue.description}</p><div className="issue-meta"><span><UserRound size={13} /> {issue.owner}</span>{issue.zoneId && <span><MapPin size={13} /> Zone linked</span>}{issue.artifactId && <span>Object linked</span>}<span>Updated {formatDate(issue.updatedAt)}</span></div>{error && <div className="field-error">{error}</div>}</div><Button variant={issue.status === 'resolved' ? 'ghost' : 'secondary'} icon={issue.status === 'resolved' ? <RotateCcw size={15} /> : <Check size={15} />} onClick={result}>{resultLabel}</Button></article>;
 }
 
 function IssueEditor({ state, onClose, onSave }: { state: ReturnType<typeof useWorkspace>['state']; onClose: () => void; onSave: (draft: IssueDraft) => { ok: boolean; errors?: Record<string, string> } }) {

@@ -1,4 +1,4 @@
-import type { WorkspaceState } from '../domain/models';
+import type { ReadinessResult, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
   id: string;
@@ -21,7 +21,25 @@ interface LegacyWorkspace {
   zones?: LegacyZone[];
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
+  readiness?: WorkspaceState['readiness'];
   lastSavedAt?: string;
+}
+
+function isReadinessResult(value: unknown): value is ReadinessResult {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<ReadinessResult>;
+  return typeof candidate.ready === 'boolean'
+    && typeof candidate.score === 'number'
+    && typeof candidate.checkedAt === 'string'
+    && Array.isArray(candidate.blockers)
+    && (candidate.blockers as unknown[]).every((blocker) =>
+      Boolean(blocker) && typeof blocker === 'object' && typeof (blocker as { message?: unknown }).message === 'string')
+    && Array.isArray(candidate.cautions)
+    && Array.isArray(candidate.facts)
+    && (candidate.facts as unknown[]).every((fact) =>
+      Boolean(fact) && typeof fact === 'object'
+      && typeof (fact as { key?: unknown }).key === 'string'
+      && typeof (fact as { hash?: unknown }).hash === 'string');
 }
 
 export function migrateWorkspace(value: unknown): WorkspaceState | null {
@@ -39,6 +57,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     zones,
     issues: source.issues,
     preferences: source.preferences,
+    readiness: isReadinessResult(source.readiness) ? source.readiness : undefined,
     lastSavedAt: source.lastSavedAt,
   };
 }

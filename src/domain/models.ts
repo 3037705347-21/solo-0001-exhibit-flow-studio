@@ -84,6 +84,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  readiness?: ReadinessResult;
   lastSavedAt?: string;
 }
 
@@ -152,12 +153,39 @@ export interface JourneyAnalysis {
   warningCount: number;
 }
 
+export type ReadinessLinkKind = 'zone' | 'artifact' | 'issue' | 'journey';
+
+export interface ReadinessLink {
+  kind: ReadinessLinkKind;
+  id?: string;
+  label: string;
+}
+
+export interface ReadinessBlocker {
+  id: string;
+  message: string;
+  links: ReadinessLink[];
+}
+
+export interface ReadinessFact {
+  key: string;
+  hash: string;
+}
+
 export interface ReadinessResult {
   ready: boolean;
   score: number;
-  blockers: string[];
+  blockers: ReadinessBlocker[];
   cautions: string[];
   checkedAt: string;
+  facts: ReadinessFact[];
+}
+
+export interface ReadinessDrift {
+  stale: boolean;
+  changed: string[];
+  removed: string[];
+  added: string[];
 }
 
 export interface ScenarioInput {
