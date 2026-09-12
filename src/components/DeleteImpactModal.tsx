@@ -25,7 +25,7 @@ export function DeleteImpactModal({
     <Button variant="danger" onClick={onConfirm}>Delete and flag dependents</Button>
   </>}>
     <div className="delete-impact">
-      <div className="delete-impact-warning"><AlertTriangle size={18} /><p>This permanently deletes the object. Provenance history is retained, but every downstream record below is flagged for re-review instead of continuing to show as fully valid.</p></div>
+      <div className="delete-impact-warning"><AlertTriangle size={18} /><p>This permanently deletes the object. Linked findings stay on the review desk marked <strong>needs re-review</strong>, placements are archived, and every downstream published package is flagged for re-review rather than shown as fully valid.</p></div>
       {groups.length === 0
         ? <p className="lineage-empty">No placements, findings, or published packages reference this object.</p>
         : groups.map((group) => <div className="impact-group" key={group.label}>

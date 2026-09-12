@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { workspaceReducer } from './reducer';
 import { createSeedWorkspace } from './seed';
-import { artifactNodeId, findNode, issueNodeId, placementNodeId, snapshotNodeId } from '../domain/lineage';
+import { archivedPlacementNodeId, artifactNodeId, findNode, issueNodeId, placementNodeId, snapshotNodeId } from '../domain/lineage';
 import type { Artifact, ReviewIssue } from '../domain/models';
 
 function seed() {
@@ -84,16 +84,23 @@ describe('reducer lineage integration', () => {
     expect(placement?.staleReason).toBe('source-modified');
   });
 
-  it('deleting an object tombstones its placement and flags downstream', () => {
+  it('deleting an object tombstones its placement but keeps linked findings on the review desk flagged', () => {
     const state = seed();
     const tape = state.artifacts.find((a) => a.id === 'artifact-tape') as Artifact;
     const linkedIssue = state.issues.find((i) => i.artifactId === 'artifact-tape') as ReviewIssue;
     const next = workspaceReducer(state, { type: 'artifact/remove', artifactId: tape.id });
     expect(findNode(next.lineage, artifactNodeId(tape.id))?.tombstoned).toBe(true);
     expect(findNode(next.lineage, placementNodeId(tape.id))?.tombstoned).toBe(true);
-    // Issue removed together with its object is itself tombstoned explicitly.
-    expect(findNode(next.lineage, issueNodeId(linkedIssue.id))?.tombstoned).toBe(true);
-    // Structural references are cleaned.
+
+    // The linked finding REMAINS on the review desk, still pointing at the
+    // deleted object, with a lineage flag rather than disappearing.
+    const keptIssue = next.issues.find((issue) => issue.id === linkedIssue.id);
+    expect(keptIssue).toBeDefined();
+    expect(keptIssue?.artifactId).toBe('artifact-tape');
+    expect(findNode(next.lineage, issueNodeId(linkedIssue.id))?.tombstoned).toBe(false);
+    expect(findNode(next.lineage, issueNodeId(linkedIssue.id))?.staleReason).toBe('source-deleted');
+
+    // Structural placement references are cleaned; the artifact itself is gone.
     expect(next.artifacts.some((a) => a.id === tape.id)).toBe(false);
     expect(next.zones.every((zone) => !zone.artifactIds.includes(tape.id))).toBe(true);
   });
@@ -118,5 +125,54 @@ describe('reducer lineage integration', () => {
     // Seed lineage is structurally complete; restoration must not duplicate anything.
     expect(restored.lineage.nodes.length).toBe(state.lineage.nodes.length);
     expect(restored.lineage.edges.length).toBe(state.lineage.edges.length);
+  });
+
+  it('moving a placement across zones archives the old context and flags published packages', () => {
+    // 1) Publish a package containing the tape placement in Afterlives.
+    const published = workspaceReducer(seed(), {
+      type: 'snapshot/recorded',
+      snapshotId: '2026-09-10T12:00:00.000Z',
+      label: 'Package before move',
+    });
+    const snapshotId = snapshotNodeId('2026-09-10T12:00:00.000Z');
+    const oldPlacementId = placementNodeId('artifact-tape');
+    const oldPlacement = findNode(published.lineage, oldPlacementId);
+    expect(oldPlacement?.contextLabel).toBe('Afterlives');
+    const exportedEdge = published.lineage.edges.find(
+      (edge) => edge.upstream === oldPlacementId && edge.downstream === snapshotId && edge.reason === 'exported',
+    );
+    expect(exportedEdge).toBeDefined();
+
+    // 2) Move the tape to the first zone (Arrival).
+    const moved = workspaceReducer(published, { type: 'placement/assign', artifactId: 'artifact-tape', zoneId: 'zone-arrival' });
+
+    // The live placement now carries the new context and is not stale.
+    const live = findNode(moved.lineage, oldPlacementId);
+    expect(live?.contextLabel).toBe('Arrival / A Light Carried');
+    expect(live?.tombstoned).toBe(false);
+    expect(live?.staleReason).toBeUndefined();
+
+    // The previous placement is archived under a distinct id with the old zone.
+    const archivedId = archivedPlacementNodeId('artifact-tape', oldPlacement?.contextLabel ?? '');
+    const archived = findNode(moved.lineage, archivedId);
+    expect(archived?.contextLabel).toBe('Afterlives');
+    expect(archived?.tombstoned).toBe(true);
+    expect(archived?.staleReason).toBe('source-removed');
+
+    // The old package's export edge now points at the archived node — original
+    // context preserved — and the package is flagged for re-review.
+    const movedExportedEdge = moved.lineage.edges.find(
+      (edge) => edge.upstream === archivedId && edge.downstream === snapshotId && edge.reason === 'exported',
+    );
+    expect(movedExportedEdge).toBeDefined();
+    expect(findNode(moved.lineage, snapshotId)?.staleReason).toBe('source-removed');
+
+    // Zone-wide findings linked to the destination zone pick up the new placement.
+    const arrivalIssue = moved.issues.find((issue) => issue.zoneId === 'zone-arrival' && !issue.artifactId);
+    if (arrivalIssue) {
+      expect(moved.lineage.edges.some(
+        (edge) => edge.upstream === oldPlacementId && edge.downstream === issueNodeId(arrivalIssue.id) && edge.reason === 'linked',
+      )).toBe(true);
+    }
   });
 });

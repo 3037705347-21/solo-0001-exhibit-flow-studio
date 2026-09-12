@@ -9,6 +9,7 @@ import {
   STORAGE_KEY,
 } from './persistence';
 import { migrateWorkspace } from './migrations';
+import { workspaceReducer } from './reducer';
 import { createSeedWorkspace } from './seed';
 
 function memoryStorage(): Storage {
@@ -68,6 +69,22 @@ describe('workspace persistence', () => {
     void _lineage;
     const migrated = migrateWorkspace(legacy);
     expect(migrated?.lineage).toEqual({ nodes: [], edges: [], batches: [] });
+  });
+  it('preserves a finding reference to a deleted-but-tombstoned object on reload', () => {
+    const seed = createSeedWorkspace();
+    const deletedArtifactId = 'artifact-tape';
+    const issue = seed.issues.find((candidate) => candidate.artifactId === deletedArtifactId);
+    expect(issue).toBeDefined();
+    // Exercise the real reducer path: the finding stays and is lineage-flagged.
+    const stateAfterDelete = workspaceReducer(seed, { type: 'artifact/remove', artifactId: deletedArtifactId });
+    const storage = memoryStorage();
+    saveWorkspace(stateAfterDelete, storage);
+    const reloaded = loadWorkspace(storage);
+    const reloadedIssue = reloaded.issues.find((candidate) => candidate.id === issue!.id);
+    // The finding stays on the review desk and keeps its object link because
+    // the provenance node is retained as a tombstone.
+    expect(reloadedIssue).toBeDefined();
+    expect(reloadedIssue?.artifactId).toBe(deletedArtifactId);
   });
 });
 

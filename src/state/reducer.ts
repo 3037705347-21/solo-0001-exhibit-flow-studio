@@ -5,7 +5,6 @@ import {
   noteArtifactRemoved,
   noteArtifactUpserted,
   noteIssueAdded,
-  noteIssueRemoved,
   noteIssueTransitioned,
   noteIssueZoneLinked,
   notePlacementAssigned,
@@ -48,9 +47,20 @@ function assignArtifact(state: WorkspaceState, artifactId: string, zoneId: strin
     return { ...candidate, artifactIds };
   });
   const artifact = state.artifacts.find((candidate) => candidate.id === artifactId);
-  const lineage = artifact
+  let lineage = artifact
     ? notePlacementAssigned(removed.lineage, artifact, zone, new Date())
     : removed.lineage;
+  const updatedZone = zones.find((candidate) => candidate.id === zoneId);
+  // Re-resolve zone-wide findings against the new structural context: edges
+  // from the new placement to findings linked to this zone are (re)created
+  // idempotently, while edges onto the archived placement stay with history.
+  if (artifact && updatedZone) {
+    for (const issue of removed.issues) {
+      if (issue.zoneId === zoneId) {
+        lineage = noteIssueZoneLinked(lineage, issue, updatedZone);
+      }
+    }
+  }
   return { ...removed, zones, lineage };
 }
 
@@ -105,15 +115,16 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     }
     case 'artifact/remove': {
       const withoutPlacement = removeArtifactFromZones(state, action.artifactId);
-      const removedIssues = withoutPlacement.issues.filter((issue) => issue.artifactId === action.artifactId);
-      let lineage = noteArtifactRemoved(withoutPlacement.lineage, action.artifactId);
-      for (const issue of removedIssues) {
-        lineage = noteIssueRemoved(lineage, issue.id);
-      }
+      // Findings linked to the deleted object STAY on the review desk: their
+      // lineage node is flagged source-deleted and the UI presents them as
+      // needing re-review, instead of silently dropping them. The issue record
+      // keeps its object reference so the deleted source stays traceable;
+      // validateReferences preserves it because the lineage node is tombstoned.
+      const lineage = noteArtifactRemoved(withoutPlacement.lineage, action.artifactId);
       return stamp(regressReadyProject({
         ...withoutPlacement,
         artifacts: withoutPlacement.artifacts.filter((artifact) => artifact.id !== action.artifactId),
-        issues: withoutPlacement.issues.filter((issue) => issue.artifactId !== action.artifactId),
+        issues: withoutPlacement.issues,
         lineage,
       }));
     }
@@ -121,10 +132,11 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
     case 'placement/remove': {
       const next = removeArtifactFromZones(state, action.artifactId);
-      return stamp(regressReadyProject({
-        ...next,
-        lineage: notePlacementRemoved(next.lineage, action.artifactId),
-      }));
+      const artifact = state.artifacts.find((candidate) => candidate.id === action.artifactId);
+      const lineage = artifact
+        ? notePlacementRemoved(next.lineage, artifact)
+        : next.lineage;
+      return stamp(regressReadyProject({ ...next, lineage }));
     }
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));

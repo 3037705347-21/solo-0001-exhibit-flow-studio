@@ -15,6 +15,15 @@ import type {
 export const EMPTY_LINEAGE: LineageState = { nodes: [], edges: [], batches: [] };
 
 export const placementNodeId = (artifactId: string): string => `placement:${artifactId}`;
+/**
+ * Historical placement record for one specific zone context. The id is derived
+ * from BOTH the object and the original zone, so retiring the same previous
+ * placement (directly, or via remove-then-reassign, including double
+ * invocations) always collapses onto a single archive node.
+ */
+export function archivedPlacementNodeId(artifactId: string, contextLabel: string): string {
+  return `placement:${artifactId}@${stableHash(contextLabel).slice(0, 8)}`;
+}
 export const artifactNodeId = (artifactId: string): string => `artifact:${artifactId}`;
 export const issueNodeId = (issueId: string): string => `issue:${issueId}`;
 export const batchNodeId = (batchId: string): string => `batch:${batchId}`;
@@ -400,6 +409,54 @@ export function noteArtifactRemoved(lineage: LineageState, artifactId: string, a
   return next;
 }
 
+/**
+ * Retire the live placement record as a historical node with its own id, so
+ * published packages that were exported from it continue to point at the
+ * original zone context. Every edge (assigned / linked / exported) is moved
+ * onto the archive node, and the node plus its downstream packages are flagged
+ * for re-review.
+ */
+function retirePlacementNode(
+  lineage: LineageState,
+  artifact: Artifact,
+  existing: LineageNode,
+  reason: 'source-removed',
+  at: Date,
+): LineageState {
+  const timestamp = at.toISOString();
+  const liveId = placementNodeId(artifact.id);
+  const archiveId = archivedPlacementNodeId(artifact.id, existing.contextLabel ?? existing.id);
+
+  // Idempotent under repeated/double invocations (e.g. React StrictMode): if the
+  // archive node already exists and the live id no longer carries this context,
+  // there is nothing to migrate.
+  const alreadyArchived = findNode(lineage, archiveId);
+  if (alreadyArchived && findNode(lineage, liveId)?.contextLabel !== existing.contextLabel) {
+    return lineage;
+  }
+
+  const edges = lineage.edges.map((edge) => {
+    if (edge.upstream === liveId) return { ...edge, id: edgeId(archiveId, edge.downstream, edge.reason), upstream: archiveId };
+    if (edge.downstream === liveId) return { ...edge, id: edgeId(edge.upstream, archiveId, edge.reason), downstream: archiveId };
+    return edge;
+  });
+
+  let next: LineageState = {
+    ...lineage,
+    edges: edges.filter((edge, index, all) => all.findIndex((candidate) => candidate.id === edge.id) === index),
+  };
+  next = withNode(next, {
+    ...existing,
+    id: archiveId,
+    tombstoned: true,
+    tombstonedAt: alreadyArchived?.tombstonedAt ?? timestamp,
+    staleReason: reason,
+    staleSince: alreadyArchived?.staleSince ?? timestamp,
+  });
+  next = markDownstreamStale(next, [archiveId], reason, at);
+  return next;
+}
+
 export function notePlacementAssigned(
   lineage: LineageState,
   artifact: Artifact,
@@ -412,26 +469,24 @@ export function notePlacementAssigned(
   const existing = findNode(lineage, nodeId);
   let next = lineage;
 
-  if (existing && !existing.tombstoned && existing.contextLabel && existing.contextLabel !== zone.name) {
-    // Moving between zones retires the previous placement record, but it stays
-    // in the graph so its origin and export history remain traceable.
-    next = withNode(next, {
-      ...existing,
-      tombstoned: true,
-      tombstonedAt: timestamp,
-      staleReason: 'source-removed',
-      staleSince: timestamp,
-    });
+  // A cross-zone move archives the previous placement under its own id, so
+  // already-published packages keep pointing at the original zone context
+  // (and are prompted for re-review) instead of silently following the move.
+  // The previous placement may already be tombstoned (e.g. it was removed from
+  // the journey and then placed into a different zone): archive it then too,
+  // so its exported edges move with the old context instead of being reused.
+  if (existing && existing.contextLabel && existing.contextLabel !== zone.name) {
+    next = retirePlacementNode(next, artifact, existing, 'source-removed', at);
   }
 
-  const retired = findNode(next, nodeId);
+  const previous = findNode(next, nodeId);
   next = withNode(next, {
     id: nodeId,
     type: 'placement',
     label: `Placement in ${zone.name}`,
     contextLabel: zone.name,
-    origin: retired && !retired.tombstoned ? retired.origin : 'direct',
-    createdAt: retired && !retired.tombstoned ? retired.createdAt : timestamp,
+    origin: previous && !previous.tombstoned ? previous.origin : 'direct',
+    createdAt: previous && !previous.tombstoned ? previous.createdAt : timestamp,
     updatedAt: timestamp,
     tombstoned: false,
     tombstonedAt: undefined,
@@ -449,23 +504,18 @@ export function notePlacementAssigned(
   return next;
 }
 
-export function notePlacementRemoved(lineage: LineageState, artifactId: string, at = new Date()): LineageState {
-  const nodeId = placementNodeId(artifactId);
+export function notePlacementRemoved(lineage: LineageState, artifact: Artifact, at = new Date()): LineageState {
+  const nodeId = placementNodeId(artifact.id);
   const node = findNode(lineage, nodeId);
   if (!node) return lineage;
-  const timestamp = at.toISOString();
-  // Retire the placement's own export relationships: a removed placement no
-  // longer feeds published packages (the artifact node keeps its edges, so
-  // package impact is still traced through the object).
-  const edges = lineage.edges.filter(
-    (edge) => !(edge.upstream === nodeId && edge.reason === 'exported'),
-  );
-  let next = withNode({ ...lineage, edges }, {
+  // Keep the node and its exported edges in place (tombstoned + flagged) so
+  // already-published packages remain traceable to the removed placement.
+  let next = withNode(lineage, {
     ...node,
     tombstoned: true,
-    tombstonedAt: timestamp,
+    tombstonedAt: at.toISOString(),
     staleReason: 'source-removed',
-    staleSince: timestamp,
+    staleSince: at.toISOString(),
   });
   next = markDownstreamStale(next, [nodeId], 'source-removed', at);
   return next;

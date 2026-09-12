@@ -63,8 +63,9 @@ describe('export dependency check', () => {
 
   it('excludes a placement removed before export from the prospective closure', () => {
     const state = readyState((current) => {
+      const bowl = current.artifacts.find((a) => a.id === 'artifact-bowl')!;
       // Remove a placement (source-removed); bowl is a non-key reflection object.
-      const lineage = notePlacementRemoved(current.lineage, 'artifact-bowl');
+      const lineage = notePlacementRemoved(current.lineage, bowl);
       return {
         ...current,
         lineage,

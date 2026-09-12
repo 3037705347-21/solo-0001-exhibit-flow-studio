@@ -223,7 +223,7 @@ describe('lineage: source deletion', () => {
     lineage = noteIssueAdded(lineage, issue);
     // Structural zone link resolved by reconcile.
     lineage = reconcileLineage(lineage, [artifact()], [{ ...zone(), artifactIds: ['artifact-test-1'] }], [issue], 'direct');
-    lineage = notePlacementRemoved(lineage, 'artifact-test-1');
+    lineage = notePlacementRemoved(lineage, artifact());
     expect(findNode(lineage, placementNodeId('artifact-test-1'))?.tombstoned).toBe(true);
     expect(findNode(lineage, issueNodeId('issue-zone'))?.staleReason).toBe('source-removed');
   });

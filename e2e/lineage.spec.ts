@@ -78,7 +78,7 @@ test.describe('planning lineage', () => {
     await expect(page.getByText('Imported Reliquary Box')).toHaveCount(1);
   });
 
-  test('deleting a source previews the downstream impact and flags dependents', async ({ page }) => {
+  test('deleting a source previews the downstream impact and keeps its finding on the review desk flagged', async ({ page }) => {
     await page.goto('/collection');
 
     // Oral History Tape 12 is placed in "Afterlives" and linked to a critical finding.
@@ -95,8 +95,54 @@ test.describe('planning lineage', () => {
     await expect(page.getByText(/removed; dependents flagged/i)).toBeVisible();
     await expect(page.getByText('Oral History Tape 12')).toHaveCount(0);
 
-    // The review desk publishes the dependency closure panel.
+    // The linked finding REMAINS on the review desk with an explicit
+    // "Needs re-review" badge naming the deleted source.
     await page.goto('/review');
-    await expect(page.getByText('PUBLISHED PACKAGE DEPENDENCIES')).toBeVisible();
+    const finding = page.locator('.issue-row', { hasText: 'Add transcript beside oral history station' });
+    await expect(finding).toBeVisible();
+    await expect(finding.getByText('Needs re-review')).toBeVisible();
+    await expect(finding.getByText('Linked object deleted')).toBeVisible();
+  });
+
+  test('moving a placement to another zone keeps published packages on the original context and prompts re-review', async ({ page }) => {
+    // 1) Resolve all seed findings so the plan can be published. Keep
+    // advancing whichever transition is available until none remain.
+    await page.goto('/review');
+    await page.getByRole('button', { name: /All \d/ }).click();
+    for (let index = 0; index < 10; index += 1) {
+      const start = page.locator('.issue-row').getByRole('button', { name: 'Start work' }).first();
+      const resolve = page.locator('.issue-row').getByRole('button', { name: 'Resolve' }).first();
+      if (await start.count() > 0) { await start.click(); continue; }
+      if (await resolve.count() > 0) { await resolve.click(); continue; }
+      break;
+    }
+    await page.getByRole('button', { name: 'Run readiness check' }).click();
+    await expect(page.getByRole('heading', { name: 'Ready to share' })).toBeVisible();
+
+    // 2) Publish the package: the Oral History Tape placement is in Afterlives.
+    await page.getByRole('button', { name: 'Export snapshot' }).click();
+    await expect(page.getByText(/Snapshot downloaded/)).toBeVisible();
+    const packageRowLink = page.locator('.package-row').first();
+    await expect(packageRowLink).toContainText(/Package/);
+
+    // 3) Move Oral History Tape 12 from Afterlives to the Arrival zone.
+    await page.goto('/journey');
+    await page.getByRole('button', { name: 'Remove Oral History Tape 12' }).click();
+    await page.getByRole('button', { name: /Oral History Tape 12/ }).click();
+    await page.getByRole('button', { name: /Place Oral History Tape 12 here/ }).first().click();
+
+    // 4) The previously published package now prompts re-review because the
+    // archived placement (its original context) is gone from the plan.
+    await page.goto('/review');
+    const packageRow = page.locator('.package-row').first();
+    await expect(packageRow.getByText(/\d+ deleted|re-review/)).toBeVisible();
+    await packageRow.click();
+
+    // 5) Its dependency closure still points at the ORIGINAL placement context:
+    // the archived (stale) row keeps "Afterlives", distinct from the still-valid
+    // Afterlives placement of another object (Mended Serving Bowl).
+    const archivedDependency = page.locator('.dependency-row.is-stale', { hasText: 'Placement in Afterlives' });
+    await expect(archivedDependency).toBeVisible();
+    await expect(archivedDependency).toContainText('Mark reviewed');
   });
 });

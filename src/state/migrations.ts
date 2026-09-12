@@ -1,4 +1,4 @@
-import { EMPTY_LINEAGE, reconcileLineage } from '../domain/lineage';
+import { EMPTY_LINEAGE, artifactNodeId, findNode, reconcileLineage } from '../domain/lineage';
 import type { LineageState, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
@@ -76,8 +76,14 @@ export function validateReferences(state: WorkspaceState): WorkspaceState {
     zones: state.zones.map((zone) => ({ ...zone, artifactIds: zone.artifactIds.filter((id) => artifactIds.has(id)) })),
     issues: state.issues.map((issue) => ({
       ...issue,
+      // A finding may legitimately reference a deleted object when its
+      // provenance node was retained and tombstoned: keep the link so the
+      // review desk can show "source deleted — needs re-review".
       zoneId: issue.zoneId && zoneIds.has(issue.zoneId) ? issue.zoneId : undefined,
-      artifactId: issue.artifactId && artifactIds.has(issue.artifactId) ? issue.artifactId : undefined,
+      artifactId: issue.artifactId && (
+        artifactIds.has(issue.artifactId)
+        || findNode(state.lineage, artifactNodeId(issue.artifactId))?.tombstoned
+      ) ? issue.artifactId : undefined,
     })),
   };
 }
