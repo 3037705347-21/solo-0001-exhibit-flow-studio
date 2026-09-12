@@ -59,6 +59,10 @@ export interface ReviewIssue {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+  /** Optimistic-concurrency version, bumped by every status transition. */
+  revision: number;
+  /** Audit trail: id of the batch transaction that last changed this finding. */
+  lastBatchId?: string;
 }
 
 export interface PlanningPreferences {
@@ -85,6 +89,8 @@ export interface WorkspaceState {
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
   lastSavedAt?: string;
+  /** Idempotency registry: committed batch transition reports keyed by batch id. */
+  processedBatches?: Record<string, BatchTransitionReport>;
 }
 
 export interface ArtifactDraft {
@@ -158,6 +164,39 @@ export interface ReadinessResult {
   blockers: string[];
   cautions: string[];
   checkedAt: string;
+}
+
+/**
+ * One versioned transition request inside a batch transaction.
+ * `baseRevision` is the issue revision the caller observed when deciding;
+ * the commit re-checks it against the current record before writing.
+ */
+export interface BatchTransitionIntent {
+  issueId: string;
+  target: IssueStatus;
+  baseRevision: number;
+}
+
+export type BatchItemResult =
+  | { issueId: string; outcome: 'applied'; from: IssueStatus; to: IssueStatus; revision: number }
+  | { issueId: string; outcome: 'skipped'; reason: 'already-in-target'; status: IssueStatus }
+  | { issueId: string; outcome: 'conflict'; reason: 'externally-modified'; expectedRevision: number; currentRevision: number; currentStatus: IssueStatus }
+  | { issueId: string; outcome: 'invalid'; reason: 'not-found' }
+  | { issueId: string; outcome: 'invalid'; reason: 'illegal-transition'; from: IssueStatus; to: IssueStatus }
+  | { issueId: string; outcome: 'invalid'; reason: 'duplicate-in-batch' };
+
+export interface BatchOutcomeCounts {
+  applied: number;
+  skipped: number;
+  conflict: number;
+  invalid: number;
+}
+
+export interface BatchTransitionReport {
+  batchId: string;
+  at: string;
+  results: BatchItemResult[];
+  counts: BatchOutcomeCounts;
 }
 
 export interface ScenarioInput {

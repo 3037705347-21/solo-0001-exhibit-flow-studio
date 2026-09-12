@@ -30,6 +30,7 @@ export function transitionIssue(issue: ReviewIssue, target: IssueStatus, at = ne
     status: target,
     updatedAt: timestamp,
     resolvedAt: target === 'resolved' ? timestamp : undefined,
+    revision: issue.revision + 1,
   };
 }
 

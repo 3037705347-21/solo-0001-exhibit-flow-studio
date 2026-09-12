@@ -1,4 +1,4 @@
-import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
+import type { Artifact, BatchTransitionIntent, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
 
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
@@ -8,6 +8,7 @@ export type WorkspaceAction =
   | { type: 'placement/reorder'; zoneId: string; artifactId: string; direction: -1 | 1 }
   | { type: 'issue/add'; issue: ReviewIssue }
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
+  | { type: 'issue/batch-transition'; batchId: string; intents: BatchTransitionIntent[]; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
   | { type: 'workspace/reset'; state: WorkspaceState };

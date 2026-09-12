@@ -17,6 +17,7 @@ function issue(overrides: Partial<ReviewIssue> & Pick<ReviewIssue, 'id' | 'title
     artifactId: undefined,
     createdAt: '2026-09-01T10:00:00.000Z',
     updatedAt: '2026-09-01T10:00:00.000Z',
+    revision: 1,
     ...overrides,
   };
 }

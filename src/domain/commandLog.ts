@@ -17,6 +17,7 @@ export function describeAction(action: WorkspaceAction): string {
     case 'placement/reorder': return `Changed object sequence`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
     case 'issue/transition': return `Moved finding to ${action.status}`;
+    case 'issue/batch-transition': return `Batch transition of ${action.intents.length} finding${action.intents.length === 1 ? '' : 's'}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
     case 'workspace/reset': return 'Reset workspace to sample plan';

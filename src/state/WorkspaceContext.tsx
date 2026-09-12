@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { planIssueBatchTransition } from '../domain/batchTransition';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, BatchTransitionIntent, BatchTransitionReport, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -25,6 +26,7 @@ interface WorkspaceContextValue {
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
+  transitionIssuesBatch: (intents: BatchTransitionIntent[], batchId?: string) => BatchTransitionReport;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
@@ -102,6 +104,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         artifactId: draft.artifactId || undefined,
         createdAt: now,
         updatedAt: now,
+        revision: 1,
       },
     });
     return { ok: true };
@@ -117,6 +120,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
     }
   }, [state.issues]);
+
+  const transitionIssuesBatch = useCallback((intents: BatchTransitionIntent[], batchId = createId('batch')): BatchTransitionReport => {
+    // Idempotent replay: a batch id that already committed returns its stored
+    // report instead of writing again.
+    const existing = state.processedBatches?.[batchId];
+    if (existing) return existing;
+    // Share one timestamp between the returned report and the committed write.
+    const at = new Date();
+    const plan = planIssueBatchTransition(state, intents, { batchId, at });
+    dispatch({ type: 'issue/batch-transition', batchId, intents, at });
+    return plan.report;
+  }, [state]);
 
   const updatePreferences = useCallback((preferences: PlanningPreferences) => {
     dispatch({ type: 'preferences/update', preferences });
@@ -148,11 +163,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     reorderArtifact,
     addIssue,
     transitionReviewIssue,
+    transitionIssuesBatch,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, transitionIssuesBatch, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

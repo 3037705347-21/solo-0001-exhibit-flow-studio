@@ -22,6 +22,7 @@ interface LegacyWorkspace {
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
   lastSavedAt?: string;
+  processedBatches?: WorkspaceState['processedBatches'];
 }
 
 export function migrateWorkspace(value: unknown): WorkspaceState | null {
@@ -32,14 +33,19 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     ...zone,
     sequence: typeof zone.sequence === 'number' ? zone.sequence : index,
   }));
+  const issues = source.issues.map((issue) => ({
+    ...issue,
+    revision: typeof issue.revision === 'number' ? issue.revision : 1,
+  }));
   return {
     version: 1,
     project: source.project,
     artifacts: source.artifacts,
     zones,
-    issues: source.issues,
+    issues,
     preferences: source.preferences,
     lastSavedAt: source.lastSavedAt,
+    processedBatches: source.processedBatches,
   };
 }
 

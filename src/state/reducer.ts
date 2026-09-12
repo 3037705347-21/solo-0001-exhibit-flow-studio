@@ -1,3 +1,4 @@
+import { planIssueBatchTransition, recordBatchReport } from '../domain/batchTransition';
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
@@ -84,6 +85,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
         ),
       }));
+    case 'issue/batch-transition': {
+      // Idempotency: a batch id that was already committed never writes again.
+      if (state.processedBatches?.[action.batchId]) return state;
+      // Re-check every record against authoritative state at commit time, then
+      // apply all valid updates in a single state transition (no partial writes).
+      const plan = planIssueBatchTransition(state, action.intents, { batchId: action.batchId, at: action.at });
+      const updatesById = new Map(plan.updates.map((issue) => [issue.id, issue]));
+      return stamp(regressReadyProject({
+        ...state,
+        issues: state.issues.map((issue) => updatesById.get(issue.id) ?? issue),
+        processedBatches: recordBatchReport(state.processedBatches, plan.report),
+      }));
+    }
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });
     case 'project/readiness':

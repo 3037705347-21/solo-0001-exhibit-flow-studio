@@ -33,7 +33,7 @@ The user opens the journey view, assigns unplaced objects to zones, changes plac
 
 ### 3. Run a review to readiness
 
-The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
+The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. Findings can also be transitioned as a versioned batch: each record is re-checked against its current revision at commit time, valid records are updated together with uniform timestamps and audit data, and records that changed externally or are ineligible are returned as explainable per-item results (completed, skipped, or needing a new decision). Committed batch ids are remembered so a repeated submission never writes twice, and held-back items can be re-checked with fresh state. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
 
 ### 4. Compare planning scenarios
 
@@ -49,6 +49,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
+- Batch finding transitions are versioned, idempotent transactions: every record carries a revision that is re-checked at commit time, a committed batch id never writes twice, and records changed since selection are held back for a fresh decision rather than overwritten.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
 
 ## Modules and dependency direction

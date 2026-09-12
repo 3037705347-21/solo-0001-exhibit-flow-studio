@@ -239,6 +239,7 @@ export function createSeedWorkspace(): WorkspaceState {
         owner: 'Mara Chen',
         createdAt: '2026-08-20T10:00:00.000Z',
         updatedAt: '2026-09-01T14:30:00.000Z',
+        revision: 1,
       },
       {
         id: 'issue-entry-copy',
@@ -250,6 +251,7 @@ export function createSeedWorkspace(): WorkspaceState {
         owner: 'Theo James',
         createdAt: '2026-08-23T12:00:00.000Z',
         updatedAt: '2026-08-23T12:00:00.000Z',
+        revision: 1,
       },
       {
         id: 'issue-quilt-light',
@@ -263,6 +265,7 @@ export function createSeedWorkspace(): WorkspaceState {
         createdAt: '2026-08-18T09:00:00.000Z',
         updatedAt: '2026-08-28T16:00:00.000Z',
         resolvedAt: '2026-08-28T16:00:00.000Z',
+        revision: 1,
       },
     ],
     preferences: {
