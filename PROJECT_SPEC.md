@@ -31,6 +31,8 @@ The user opens the collection view, searches and filters existing objects, adds 
 
 The user opens the journey view, assigns unplaced objects to zones, changes placement sequence, and moves objects between zones. The domain engine recalculates zone dwell time, density, narrative coverage, and accessibility constraints after every transition. A validation panel exposes blocking errors and warnings, and links findings back to affected zones.
 
+When several objects conflict with several zones at once, the user opens the **constraint repair sandbox**. The user selects the capacity, density, role, and accessibility conflicts to solve together; the domain engine returns one deterministic, minimal candidate change set. Every candidate shows its reason, the options that are unavailable and why (key-object protection, incompatible light or seating, full or overloaded targets, last narrative-role carrier), and the affected materials: object and zone placement history, linked review findings, and any superseded readiness result. Nothing is written while the proposal is previewed. Confirmation submits the whole set in one command against the plan revision it was computed from; key objects are never moved or unplaced automatically. If a placement or finding changed in the meantime (revision mismatch), or the same proposal is confirmed twice, the command is rejected without touching the plan and the candidate set is recalculated.
+
 ### 3. Run a review to readiness
 
 The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
@@ -50,6 +52,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
+- Repair-sandbox proposals are derived previews; they only become plan changes through a single atomic commit against a deterministic plan revision computed from placements and findings. Stale revisions, duplicate confirms, failed simulations, and key-object moves are rejected before the reducer is reached.
 
 ## Modules and dependency direction
 

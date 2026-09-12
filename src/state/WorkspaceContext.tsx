@@ -1,7 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { computePlanRevision } from '../domain/planVersion';
+import { commitRepairOperations, RepairCommitError, type RepairOperation } from '../domain/repairSandbox';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
@@ -23,6 +25,7 @@ interface WorkspaceContextValue {
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
+  applyRepairProposal: (operations: RepairOperation[], expectedRevision: string) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
@@ -36,6 +39,15 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
+
+  // Refs let long-lived commands validate against the plan version that is
+  // current at confirm time, rather than the render the command was created on.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const appliedRepairRevision = useRef<string | null>(null);
+  // Last proposal signature handed to the reducer. A second click on the same
+  // proposal (before React re-renders with the new revision) is rejected here.
+  const pendingRepairSignature = useRef<string | null>(null);
 
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
@@ -81,6 +93,34 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return { ok: true };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Object sequence could not be changed.' };
+    }
+  }, []);
+
+  const applyRepairProposal = useCallback((operations: RepairOperation[], expectedRevision: string): CommandResult => {
+    const current = stateRef.current;
+    const signature = `${expectedRevision}:${JSON.stringify(operations)}`;
+    if (pendingRepairSignature.current === signature) {
+      return { ok: false, message: 'This repair proposal was already applied.' };
+    }
+    try {
+      // Validate and dry-run the whole set against the current revision before
+      // dispatching anything. Stale proposals, duplicate confirms and failed
+      // simulations return here without touching the plan.
+      const next = commitRepairOperations({
+        state: current,
+        operations,
+        expectedRevision,
+        appliedRevision: appliedRepairRevision.current,
+      });
+      pendingRepairSignature.current = signature;
+      dispatch({ type: 'repair/commit', operations, expectedRevision });
+      appliedRepairRevision.current = computePlanRevision(next);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof RepairCommitError) {
+        return { ok: false, message: error.message };
+      }
+      return { ok: false, message: 'The repair proposal could not be applied.' };
     }
   }, []);
 
@@ -146,13 +186,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     assignArtifact,
     removePlacement,
     reorderArtifact,
+    applyRepairProposal,
     addIssue,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, applyRepairProposal, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

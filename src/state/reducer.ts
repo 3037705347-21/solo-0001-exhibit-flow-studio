@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { commitRepairOperations, RepairCommitError } from '../domain/repairSandbox';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -75,6 +76,22 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+    case 'repair/commit': {
+      // Domain function verifies the revision and dry-runs every operation
+      // before returning the next state. A stale or duplicate dispatch is a
+      // no-op so a rejected proposal can never land or crash the reducer.
+      try {
+        const next = commitRepairOperations({
+          state,
+          operations: action.operations,
+          expectedRevision: action.expectedRevision,
+        });
+        return stamp(regressReadyProject(next));
+      } catch (error) {
+        if (error instanceof RepairCommitError) return state;
+        throw error;
+      }
+    }
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
     case 'issue/transition':
