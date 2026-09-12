@@ -160,7 +160,11 @@ export function resolveRestoreIndex(zone: Zone, removal: PlacementRemoval): { in
   }
   const { neighborBeforeId, neighborAfterId } = removal;
   if (neighborBeforeId === null && neighborAfterId === null) {
-    return { index: 0 };
+    // The object was the zone's only placement, so there is no neighbor to
+    // anchor against. The exact-sequence branch above already handled a still
+    // empty zone; reaching here means other objects were added after removal,
+    // so index 0 would be a blind insertion — require manual review.
+    return { ambiguous: true };
   }
   if (neighborBeforeId === null) {
     // The object led the zone: its old after-neighbor must still lead it.

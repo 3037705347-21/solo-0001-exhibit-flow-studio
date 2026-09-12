@@ -333,6 +333,57 @@ describe('placement removal recovery', () => {
     expect(findZone(forced.next, 'zone-common').artifactIds).toEqual(['artifact-press', 'artifact-intruder', 'artifact-quilt']);
   });
 
+  it('returns a zone-only object to index 0 while the zone stays empty', () => {
+    // The lantern is the only object in zone-arrival, so it has no anchors.
+    const state = seeded();
+    const removal = createPlacementRemoval(state, 'artifact-lantern', 'removal-lantern', REMOVED_AT)!;
+    expect(removal.neighborBeforeId).toBeNull();
+    expect(removal.neighborAfterId).toBeNull();
+    expect(removal.zoneOrderAfterRemoval).toEqual([]);
+    const removedState = applyPlacementRemoval(state, removal);
+    expect(findZone(removedState, 'zone-arrival').artifactIds).toEqual([]);
+
+    const slot = resolveRestoreIndex(findZone(removedState, 'zone-arrival'), removal);
+    expect(slot).toEqual({ index: 0 });
+    const result = restore(removedState, removal.id);
+    expect(result.outcome.kind).toBe('restored');
+    expect(findZone(result.next, 'zone-arrival').artifactIds).toEqual(['artifact-lantern']);
+  });
+
+  it('holds a zone-only removal for review when objects were added to the anchorless zone', () => {
+    // After the only object leaves, the gloves (standard light, no seating
+    // need) are placed into the now-empty arrival zone.
+    const state = seeded();
+    const removal = createPlacementRemoval(state, 'artifact-lantern', 'removal-lantern-conflict', REMOVED_AT)!;
+    const removedState = applyPlacementRemoval(state, removal);
+    const next: WorkspaceState = {
+      ...removedState,
+      zones: removedState.zones.map((zone) =>
+        zone.id === 'zone-arrival' ? { ...zone, artifactIds: ['artifact-gloves'] } : zone,
+      ),
+    };
+
+    const slot = resolveRestoreIndex(findZone(next, 'zone-arrival'), removal);
+    expect(slot).toEqual({ ambiguous: true });
+
+    const { outcome, next: reviewed } = restore(next, removal.id);
+    expect(outcome.kind).toBe('review');
+    expect(outcome.reason).toBe('position-ambiguous');
+    // The newcomer stays untouched, no blind insertion at index 0, and the
+    // original record is preserved for review.
+    expect(findZone(reviewed, 'zone-arrival').artifactIds).toEqual(['artifact-gloves']);
+    const record = reviewed.removals.find((candidate) => candidate.id === removal.id)!;
+    expect(record.status).toBe('in-review');
+    expect(record.conflictReason).toBe('position-ambiguous');
+    expect(record.reviewAttempts).toBe(1);
+
+    // Curator sign-off cannot invent a position either: this is a hard check.
+    const forced = evaluateRestore(reviewed, removal.id, RESTORED_AT, { approved: true });
+    expect(forced.outcome.kind).toBe('review');
+    expect(forced.outcome.reason).toBe('position-ambiguous');
+    expect(findZone(forced.next, 'zone-arrival').artifactIds).toEqual(['artifact-gloves']);
+  });
+
   it('allows re-evaluation after the conflict is resolved manually', () => {    const removed = removeQuilt(seeded());
     const originalCapacity = findZone(removed.state, 'zone-common').capacityMinutes;
     const shrunk: WorkspaceState = {
