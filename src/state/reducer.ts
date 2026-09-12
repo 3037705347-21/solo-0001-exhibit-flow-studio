@@ -1,3 +1,4 @@
+import { applyArtifactSwap } from '../domain/swap';
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
@@ -75,6 +76,10 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+    case 'placement/swap': {
+      const swapped = applyArtifactSwap(state, action.request);
+      return swapped ? stamp(regressReadyProject(swapped)) : state;
+    }
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
     case 'issue/transition':

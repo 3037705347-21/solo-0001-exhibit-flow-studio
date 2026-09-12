@@ -3,6 +3,7 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
+import { applyArtifactSwap, swapRequestFromPreview, type SwapPreview } from '../domain/swap';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
@@ -23,6 +24,7 @@ interface WorkspaceContextValue {
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
+  swapArtifacts: (preview: SwapPreview) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
@@ -83,6 +85,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: error instanceof Error ? error.message : 'Object sequence could not be changed.' };
     }
   }, []);
+
+  const swapArtifacts = useCallback((preview: SwapPreview): CommandResult => {
+    if (!preview.canSwap) {
+      return { ok: false, message: preview.errors[0]?.detail ?? 'The swap breaks a placement rule.' };
+    }
+    const request = swapRequestFromPreview(preview);
+    if (!applyArtifactSwap(state, request)) {
+      return { ok: false, message: 'The plan changed before the swap was confirmed. No placements were moved.' };
+    }
+    dispatch({ type: 'placement/swap', request });
+    return { ok: true };
+  }, [state]);
 
   const addIssue = useCallback((draft: IssueDraft): CommandResult => {
     if (!draft.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
@@ -146,13 +160,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     assignArtifact,
     removePlacement,
     reorderArtifact,
+    swapArtifacts,
     addIssue,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, swapArtifacts, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
