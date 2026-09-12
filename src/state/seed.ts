@@ -186,6 +186,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#d7654e',
         sequence: 0,
         artifactIds: ['artifact-lantern'],
+        version: 1,
       },
       {
         id: 'zone-patterns',
@@ -199,6 +200,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#7c6aa6',
         sequence: 1,
         artifactIds: ['artifact-sample-book', 'artifact-radio'],
+        version: 1,
       },
       {
         id: 'zone-common',
@@ -212,6 +214,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#2f7c75',
         sequence: 2,
         artifactIds: ['artifact-press', 'artifact-quilt'],
+        version: 1,
       },
       {
         id: 'zone-after',
@@ -225,6 +228,7 @@ export function createSeedWorkspace(): WorkspaceState {
         color: '#597b8e',
         sequence: 3,
         artifactIds: ['artifact-bowl', 'artifact-tape'],
+        version: 1,
       },
     ],
     issues: [

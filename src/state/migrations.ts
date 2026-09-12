@@ -12,6 +12,7 @@ interface LegacyZone {
   color: string;
   sequence?: number;
   artifactIds: string[];
+  version?: number;
 }
 
 interface LegacyWorkspace {
@@ -31,6 +32,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
   const zones = source.zones.map((zone, index) => ({
     ...zone,
     sequence: typeof zone.sequence === 'number' ? zone.sequence : index,
+    version: typeof zone.version === 'number' ? zone.version : 1,
   }));
   return {
     version: 1,

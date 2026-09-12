@@ -1,3 +1,4 @@
+import { dedupeOrder, isPermutationOf, sameOrder } from '../domain/reorder';
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
@@ -9,10 +10,14 @@ function stamp(state: WorkspaceState): WorkspaceState {
 function removeArtifactFromZones(state: WorkspaceState, artifactId: string): WorkspaceState {
   return {
     ...state,
-    zones: state.zones.map((zone) => ({
-      ...zone,
-      artifactIds: zone.artifactIds.filter((id) => id !== artifactId),
-    })),
+    zones: state.zones.map((zone) => {
+      if (!zone.artifactIds.includes(artifactId)) return zone;
+      return {
+        ...zone,
+        artifactIds: zone.artifactIds.filter((id) => id !== artifactId),
+        version: zone.version + 1,
+      };
+    }),
   };
 }
 
@@ -31,24 +36,32 @@ function assignArtifact(state: WorkspaceState, artifactId: string, zoneId: strin
       const targetIndex = index === undefined ? zone.artifactIds.length : Math.max(0, Math.min(index, zone.artifactIds.length));
       const artifactIds = [...zone.artifactIds];
       artifactIds.splice(targetIndex, 0, artifactId);
-      return { ...zone, artifactIds };
+      return { ...zone, artifactIds, version: zone.version + 1 };
     }),
   };
 }
 
-function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: string, direction: -1 | 1): WorkspaceState {
+/**
+ * Compare-and-swap reorder: the resolved order is committed only when the zone
+ * version still matches the version the resolution was based on, and only when
+ * it is an exact permutation of the current order — so a stale or malformed
+ * reorder can never overwrite newer edits, drop objects, or duplicate them.
+ * Returns the same state reference when nothing may change.
+ */
+function applyZoneOrder(state: WorkspaceState, zoneId: string, expectedVersion: number, nextOrder: string[]): WorkspaceState {
+  const zone = state.zones.find((candidate) => candidate.id === zoneId);
+  if (!zone) return state;
+  if (zone.version !== expectedVersion) return state;
+  const current = dedupeOrder(zone.artifactIds);
+  // The proposed order must be an exact permutation as-is: a duplicated or
+  // incomplete proposal is rejected, never silently repaired.
+  if (!isPermutationOf(nextOrder, current)) return state;
+  if (sameOrder(nextOrder, zone.artifactIds)) return state;
   return {
     ...state,
-    zones: state.zones.map((zone) => {
-      if (zone.id !== zoneId) return zone;
-      const currentIndex = zone.artifactIds.indexOf(artifactId);
-      if (currentIndex === -1) throw new Error('The artifact is not placed in this zone.');
-      const targetIndex = currentIndex + direction;
-      if (targetIndex < 0 || targetIndex >= zone.artifactIds.length) return zone;
-      const artifactIds = [...zone.artifactIds];
-      [artifactIds[currentIndex], artifactIds[targetIndex]] = [artifactIds[targetIndex], artifactIds[currentIndex]];
-      return { ...zone, artifactIds };
-    }),
+    zones: state.zones.map((candidate) => (candidate.id === zoneId
+      ? { ...candidate, artifactIds: [...nextOrder], version: candidate.version + 1 }
+      : candidate)),
   };
 }
 
@@ -73,8 +86,10 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(assignArtifact(state, action.artifactId, action.zoneId, action.index)));
     case 'placement/remove':
       return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
-    case 'placement/reorder':
-      return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+    case 'placement/reorder': {
+      const next = applyZoneOrder(state, action.zoneId, action.expectedVersion, action.nextOrder);
+      return next === state ? state : stamp(regressReadyProject(next));
+    }
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
     case 'issue/transition':
@@ -95,6 +110,9 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'workspace/restore':
+    case 'workspace/external':
+      return action.state;
     case 'workspace/reset':
       return action.state;
     default:

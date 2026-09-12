@@ -24,13 +24,21 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     && Boolean(candidate.preferences);
 }
 
+export function parseWorkspace(raw: string): WorkspaceState | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const migrated = migrateWorkspace(parsed);
+    return migrated && isWorkspaceState(migrated) ? validateReferences(migrated) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage): WorkspaceState {
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return createSeedWorkspace();
-    const parsed: unknown = JSON.parse(raw);
-    const migrated = migrateWorkspace(parsed);
-    return migrated && isWorkspaceState(migrated) ? validateReferences(migrated) : createSeedWorkspace();
+    return parseWorkspace(raw) ?? createSeedWorkspace();
   } catch {
     return createSeedWorkspace();
   }

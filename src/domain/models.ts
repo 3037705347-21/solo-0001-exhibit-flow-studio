@@ -45,6 +45,11 @@ export interface Zone {
   color: string;
   sequence: number;
   artifactIds: string[];
+  /**
+   * Optimistic-concurrency version. The reducer increments it every time
+   * `artifactIds` changes, so a reorder can prove which order it was based on.
+   */
+  version: number;
 }
 
 export interface ReviewIssue {

@@ -39,3 +39,5 @@ npm run check       # all checks in sequence
 ## Design notes
 
 State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.
+
+Zone reordering is versioned: every move carries the zone version it was based on and is re-validated before committing. If another tab changed the zone, the move is rebased into a deterministic equivalent order (or rejected with a visible diff for re-confirmation) instead of overwriting the external edits. Placement changes are undoable with Ctrl/Cmd+Z and redoable with Ctrl/Cmd+Shift+Z.
