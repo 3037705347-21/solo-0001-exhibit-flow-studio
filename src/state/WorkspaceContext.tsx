@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { createChecklistHandoff, validateHandoffDraft, type HandoffDraft } from '../domain/checklistHandoff';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, ChecklistHandoff, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -28,6 +29,7 @@ interface WorkspaceContextValue {
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
+  recordChecklistHandoff: (zoneId: string, draft: HandoffDraft) => CommandResult<ChecklistHandoff>;
   resetWorkspace: () => void;
 }
 
@@ -136,6 +138,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
+  const recordChecklistHandoff = useCallback((zoneId: string, draft: HandoffDraft): CommandResult<ChecklistHandoff> => {
+    const validation = validateHandoffDraft(draft);
+    if (validation.length) {
+      return {
+        ok: false,
+        errors: Object.fromEntries(validation.map((error) => [error.field, error.message])),
+        message: 'Review the highlighted fields before recording the handoff.',
+      };
+    }
+    const handoff = createChecklistHandoff(state, zoneId, draft);
+    if (!handoff) return { ok: false, message: 'Select a zone before recording a handoff.' };
+    dispatch({ type: 'checklist/record-handoff', handoff });
+    return { ok: true, value: handoff };
+  }, [state]);
+
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
@@ -151,8 +168,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    recordChecklistHandoff,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, recordChecklistHandoff, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

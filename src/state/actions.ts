@@ -1,4 +1,4 @@
-import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
+import type { Artifact, ChecklistHandoff, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
 
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
@@ -10,4 +10,5 @@ export type WorkspaceAction =
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
+  | { type: 'checklist/record-handoff'; handoff: ChecklistHandoff }
   | { type: 'workspace/reset'; state: WorkspaceState };

@@ -4,7 +4,7 @@ test('filter by zone, download the floor checklist, and keep the filter after re
   await page.goto('/review');
 
   // The floor checklist only appears once a zone is selected.
-  await expect(page.getByRole('button', { name: 'Download zone checklist (CSV)' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download current state (CSV)' })).toHaveCount(0);
 
   await page.getByLabel('Exhibition zone').selectOption('zone-common');
 
@@ -17,7 +17,7 @@ test('filter by zone, download the floor checklist, and keep the filter after re
 
   // Download produces a CSV file.
   const downloadPromise = page.waitForEvent('download');
-  await card.getByRole('button', { name: 'Download zone checklist (CSV)' }).click();
+  await card.getByRole('button', { name: 'Download current state (CSV)' }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/exhibit-flow-zone-checklist-common-thread-.*\.csv/);
 
@@ -28,5 +28,5 @@ test('filter by zone, download the floor checklist, and keep the filter after re
 
   // Switching back to all zones restores the overview and hides the checklist.
   await page.getByLabel('Exhibition zone').selectOption('');
-  await expect(page.getByRole('button', { name: 'Download zone checklist (CSV)' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download current state (CSV)' })).toHaveCount(0);
 });

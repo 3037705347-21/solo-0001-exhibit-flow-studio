@@ -1,38 +1,8 @@
 import { sortZones } from './filters';
 import { formatMinutes } from './formatters';
-import type { IssueSeverity, IssueStatus, WorkspaceState, Zone } from './models';
+import type { ChecklistFinding, IssueSeverity, IssueStatus, WorkspaceState, Zone, ZoneChecklist, ZoneChecklistEntry } from './models';
 
-export interface ChecklistFinding {
-  severity: IssueSeverity;
-  status: IssueStatus;
-  title: string;
-  owner: string;
-  scope: 'object' | 'zone';
-}
-
-export interface ZoneChecklistEntry {
-  sequence: number;
-  artifactId: string;
-  accessionId: string;
-  title: string;
-  dwellMinutes: number;
-  unresolvedFindings: ChecklistFinding[];
-}
-
-export interface ZoneChecklist {
-  zoneId: string;
-  zoneName: string;
-  zoneShortLabel: string;
-  thesis: string;
-  projectTitle: string;
-  venue: string;
-  generatedAt: string;
-  totalDwellMinutes: number;
-  objectCount: number;
-  unresolvedCount: number;
-  zoneFindings: ChecklistFinding[];
-  entries: ZoneChecklistEntry[];
-}
+export type { ChecklistFinding, ZoneChecklist, ZoneChecklistEntry } from './models';
 
 export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = new Date()): ZoneChecklist | null {
   const zone = sortZones(state.zones).find((candidate) => candidate.id === zoneId);
@@ -89,13 +59,17 @@ export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = n
   };
 }
 
-export function zoneChecklistFileName(zone: Zone, date = new Date()): string {
-  const slug = (zone.shortLabel || zone.name)
+export function zoneLabelSlug(label: string): string {
+  return label
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+export function zoneChecklistFileName(zone: Zone, date = new Date()): string {
+  const slug = zoneLabelSlug(zone.shortLabel || zone.name);
   return `exhibit-flow-zone-checklist-${slug}-${date.toISOString().slice(0, 10)}.csv`;
 }
 

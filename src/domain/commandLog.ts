@@ -19,6 +19,7 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'checklist/record-handoff': return `Recorded checklist handoff v${action.handoff.version} for zone ${action.handoff.zoneId}`;
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }

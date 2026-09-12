@@ -20,6 +20,7 @@ The application is a pure frontend project. It does not require accounts, a serv
 - `Placement`: the assignment of an artifact to a zone and a position in that zone.
 - `ReviewIssue`: a severity-ranked finding linked to a zone or artifact, with open, in-progress, or resolved state.
 - `Snapshot`: a frozen readiness summary used for local export and comparison.
+- `ChecklistHandoff`: a frozen, versioned zone-checklist export recording usage scope, receiving members, the readiness basis, and a content summary, so field teams can keep referencing a handed-off file while the plan evolves.
 
 ## Workflows
 
@@ -34,6 +35,8 @@ The user opens the journey view, assigns unplaced objects to zones, changes plac
 ### 3. Run a review to readiness
 
 The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
+
+Zone floor checklists can be frozen into versioned handoffs that capture the usage scope, receiving members, readiness basis, and a content digest at recording time. Later downloads are explicit: the current live state or a specific frozen handoff version. When placements, findings, or zone conditions change after a handoff, the recorded version stays byte-identical and re-downloadable, but the review view flags it as drifted from the current plan.
 
 ### 4. Compare planning scenarios
 

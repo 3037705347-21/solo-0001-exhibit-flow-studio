@@ -77,6 +77,64 @@ export interface ExhibitProject {
   lastReadinessCheck?: string;
 }
 
+export interface ChecklistFinding {
+  severity: IssueSeverity;
+  status: IssueStatus;
+  title: string;
+  owner: string;
+  scope: 'object' | 'zone';
+}
+
+export interface ZoneChecklistEntry {
+  sequence: number;
+  artifactId: string;
+  accessionId: string;
+  title: string;
+  dwellMinutes: number;
+  unresolvedFindings: ChecklistFinding[];
+}
+
+export interface ZoneChecklist {
+  zoneId: string;
+  zoneName: string;
+  zoneShortLabel: string;
+  thesis: string;
+  projectTitle: string;
+  venue: string;
+  generatedAt: string;
+  totalDwellMinutes: number;
+  objectCount: number;
+  unresolvedCount: number;
+  zoneFindings: ChecklistFinding[];
+  entries: ZoneChecklistEntry[];
+}
+
+export interface HandoffReadinessBasis {
+  stage: ProjectStage;
+  ready: boolean;
+  score: number;
+  blockers: string[];
+  cautions: string[];
+  checkedAt: string;
+}
+
+export interface ChecklistHandoff {
+  id: string;
+  zoneId: string;
+  version: number;
+  createdAt: string;
+  scope: string;
+  members: string[];
+  readinessBasis: HandoffReadinessBasis;
+  summary: {
+    objectCount: number;
+    totalDwellMinutes: number;
+    unresolvedCount: number;
+    digest: string;
+  };
+  checklist: ZoneChecklist;
+}
+
 export interface WorkspaceState {
   version: 1;
   project: ExhibitProject;
@@ -84,6 +142,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  checklistHandoffs: ChecklistHandoff[];
   lastSavedAt?: string;
 }
 

@@ -21,7 +21,8 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     && Array.isArray(candidate.artifacts)
     && Array.isArray(candidate.zones)
     && Array.isArray(candidate.issues)
-    && Boolean(candidate.preferences);
+    && Boolean(candidate.preferences)
+    && Array.isArray(candidate.checklistHandoffs);
 }
 
 export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage): WorkspaceState {

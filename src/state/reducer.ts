@@ -95,6 +95,10 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'checklist/record-handoff':
+      // Handoffs are append-only: recording a new version never rewrites
+      // history and never regresses the project's readiness stage.
+      return stamp({ ...state, checklistHandoffs: [...state.checklistHandoffs, action.handoff] });
     case 'workspace/reset':
       return action.state;
     default:
