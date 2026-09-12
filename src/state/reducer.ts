@@ -1,3 +1,4 @@
+import { samePreferences } from '../domain/scenarioDraft';
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
@@ -85,6 +86,8 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
         ),
       }));
     case 'preferences/update':
+      // Idempotent: resubmitting identical preferences is not a new update.
+      if (samePreferences(state.preferences, action.preferences)) return state;
       return stamp({ ...state, preferences: action.preferences });
     case 'project/readiness':
       return stamp({

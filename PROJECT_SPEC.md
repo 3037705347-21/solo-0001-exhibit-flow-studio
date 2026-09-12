@@ -37,7 +37,7 @@ The user opens the review view, creates a finding linked to an object or zone, m
 
 ### 4. Compare planning scenarios
 
-The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. The user can apply a scenario as planning preferences or return to the baseline.
+The user opens the insights view and adjusts the visitor pace and accessibility priority scenario controls. The projection engine recomputes expected visit length, pressure points, and coverage without mutating the saved plan. Unapplied edits are kept as a recoverable draft recording the delta against the saved preferences, the last edit time, and the plan version the edits were based on; after a reload or navigation the user can continue, apply, revert, or discard the draft. Applying commits only after the draft is revalidated against the current plan version — a stale or invalid draft is never written and must be reconfirmed against the recalculated projection — and repeated submissions collapse into a single preference update.
 
 ## State and rules
 
@@ -50,6 +50,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
+- Unapplied scenario edits persist locally as a draft (delta, edit time, base plan version) and are applied only through a plan-version-checked, idempotent commit.
 
 ## Modules and dependency direction
 

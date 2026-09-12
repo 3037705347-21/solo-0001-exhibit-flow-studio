@@ -3,6 +3,8 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
+import { clampScenario } from '../domain/scenario';
+import { isValidScenarioInput, planVersion, samePreferences } from '../domain/scenarioDraft';
 import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
@@ -13,6 +15,7 @@ interface CommandResult<T = undefined> {
   value?: T;
   errors?: Record<string, string>;
   message?: string;
+  code?: 'stale' | 'invalid';
 }
 
 interface WorkspaceContextValue {
@@ -25,7 +28,7 @@ interface WorkspaceContextValue {
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
-  updatePreferences: (preferences: PlanningPreferences) => void;
+  applyPreferences: (preferences: PlanningPreferences, baseVersion: string) => CommandResult<{ applied: boolean }>;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
@@ -118,9 +121,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [state.issues]);
 
-  const updatePreferences = useCallback((preferences: PlanningPreferences) => {
-    dispatch({ type: 'preferences/update', preferences });
-  }, []);
+  /**
+   * Transactional commit of a scenario draft. The write is refused when the
+   * plan moved past the draft's base version or the values are no longer
+   * valid, and repeated submissions collapse into a single preference update.
+   */
+  const applyPreferences = useCallback((preferences: PlanningPreferences, baseVersion: string): CommandResult<{ applied: boolean }> => {
+    if (!isValidScenarioInput(preferences)) {
+      return { ok: false, code: 'invalid', message: 'This scenario draft is no longer valid. Review the recalculated values and confirm again.' };
+    }
+    if (planVersion(state) !== baseVersion) {
+      return { ok: false, code: 'stale', message: 'The plan changed since this draft was saved. Review the recalculated projection, then confirm.' };
+    }
+    const next = clampScenario(preferences);
+    if (samePreferences(next, state.preferences)) {
+      return { ok: true, value: { applied: false } };
+    }
+    dispatch({ type: 'preferences/update', preferences: next });
+    return { ok: true, value: { applied: true } };
+  }, [state]);
 
   const checkReadiness = useCallback(() => {
     const analysis = analyzeJourney(state.artifacts, state.zones);
@@ -148,11 +167,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     reorderArtifact,
     addIssue,
     transitionReviewIssue,
-    updatePreferences,
+    applyPreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, applyPreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

@@ -50,9 +50,9 @@
       "id": "compare-scenarios",
       "name": "Compare planning scenarios",
       "entry": "browser route /insights",
-      "steps": ["adjust pace and accessibility controls", "derive a non-mutating projection", "apply selected planning preferences explicitly"],
+      "steps": ["adjust pace and accessibility controls", "derive a non-mutating projection", "recover an unapplied draft after reload", "apply selected planning preferences explicitly", "reconfirm when the plan version changed"],
       "success": "projection metrics update and applied preferences persist",
-      "failure": "out-of-range inputs are constrained and baseline state remains intact",
+      "failure": "out-of-range inputs are constrained, stale or invalid drafts are not written, and baseline state remains intact",
       "verification": "Playwright changes scenario controls and verifies projected duration and applied state",
       "module_ids": ["app", "insights", "state", "domain", "components"]
     }
