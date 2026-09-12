@@ -79,6 +79,7 @@ export interface ExhibitProject {
 
 export interface WorkspaceState {
   version: 1;
+  revision: number;
   project: ExhibitProject;
   artifacts: Artifact[];
   zones: Zone[];

@@ -1,11 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import {
+  PlanTransactionError,
+  commitPlanTransaction,
+  preparePlanBatch,
+  revertPlanTransaction,
+  type PlanBatchPreview,
+  type PlanSuggestion,
+  type PlanTransaction,
+} from '../domain/planTransaction';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ScenarioInput, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import { loadWorkspace, saveWorkspace, STORAGE_KEY } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -15,9 +24,16 @@ interface CommandResult<T = undefined> {
   message?: string;
 }
 
+interface PlanCommitResult {
+  ok: boolean;
+  message?: string;
+  transaction?: PlanTransaction;
+}
+
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
+  lastTransaction: PlanTransaction | null;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
@@ -26,6 +42,10 @@ interface WorkspaceContextValue {
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
+  prepareBatch: (suggestions: PlanSuggestion[], selectedIds: string[], scenarioInput: ScenarioInput) => PlanBatchPreview;
+  commitBatch: (preview: PlanBatchPreview) => PlanCommitResult;
+  undoLastTransaction: () => CommandResult;
+  dismissUndo: () => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
   resetWorkspace: () => void;
@@ -36,13 +56,43 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
   const [storageHealthy, setStorageHealthy] = useState(true);
+  const [lastTransaction, setLastTransaction] = useState<PlanTransaction | null>(null);
+
+  // Latest state for command callbacks that must validate against the live
+  // revision rather than the render they were created in.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Retained for the undo guard; undo validates against the same transaction
+  // that was committed, even across re-renders.
+  const lastTransactionRef = useRef<PlanTransaction | null>(null);
+  lastTransactionRef.current = lastTransaction;
 
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
 
+  // Adopt plan changes persisted in another browser tab. Prepared batches
+  // retain their base revision, so a batch committed against stale data is
+  // rejected wholesale instead of overwriting the external edit.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || !event.newValue) return;
+      try {
+        const external = JSON.parse(event.newValue) as WorkspaceState;
+        if (external.version === 1 && external.revision !== stateRef.current.revision) {
+          dispatch({ type: 'workspace/sync-external', state: external });
+        }
+      } catch {
+        // Malformed external writes are ignored; local state remains intact.
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
-    const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
+    const validation = validateArtifactDraft(draft, stateRef.current.artifacts, existing?.id);
     if (validation.length) {
       return {
         ok: false,
@@ -53,14 +103,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const artifact = artifactFromDraft(draft, existing);
     dispatch({ type: 'artifact/upsert', artifact });
     return { ok: true, value: artifact };
-  }, [state.artifacts]);
+  }, []);
 
   const removeArtifact = useCallback((artifactId: string): CommandResult => {
-    const artifact = state.artifacts.find((candidate) => candidate.id === artifactId);
+    const artifact = stateRef.current.artifacts.find((candidate) => candidate.id === artifactId);
     if (!artifact) return { ok: false, message: 'The selected object no longer exists.' };
     dispatch({ type: 'artifact/remove', artifactId });
     return { ok: true };
-  }, [state.artifacts]);
+  }, []);
 
   const assignArtifact = useCallback((artifactId: string, zoneId: string): CommandResult => {
     try {
@@ -108,7 +158,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
-    const issue = state.issues.find((candidate) => candidate.id === issueId);
+    const issue = stateRef.current.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
     try {
       dispatch({ type: 'issue/transition', issueId, status });
@@ -116,31 +166,77 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
     }
-  }, [state.issues]);
+  }, []);
 
   const updatePreferences = useCallback((preferences: PlanningPreferences) => {
     dispatch({ type: 'preferences/update', preferences });
   }, []);
 
+  const prepareBatch = useCallback((suggestions: PlanSuggestion[], selectedIds: string[], scenarioInput: ScenarioInput): PlanBatchPreview => {
+    return preparePlanBatch(stateRef.current, suggestions, selectedIds, scenarioInput);
+  }, []);
+
+  const commitBatch = useCallback((preview: PlanBatchPreview): PlanCommitResult => {
+    const live = stateRef.current;
+    const transactionId = createId('plan');
+    try {
+      const { transaction } = commitPlanTransaction(live, preview, { id: transactionId });
+      dispatch({ type: 'plan-transaction/commit', preview, transactionId });
+      setLastTransaction(transaction);
+      return { ok: true, transaction };
+    } catch (error) {
+      if (error instanceof PlanTransactionError) {
+        return { ok: false, message: error.issues[0]?.message ?? 'The planning batch could not be applied.' };
+      }
+      return { ok: false, message: 'The planning batch could not be applied.' };
+    }
+  }, []);
+
+  const undoLastTransaction = useCallback((): CommandResult => {
+    const transaction = lastTransactionRef.current;
+    if (!transaction) return { ok: false, message: 'There is no applied planning transaction to undo.' };
+    try {
+      revertPlanTransaction(stateRef.current, transaction);
+    } catch (error) {
+      if (error instanceof PlanTransactionError) {
+        return { ok: false, message: error.issues[0]?.message ?? 'The plan changed and this transaction can no longer be undone.' };
+      }
+      return { ok: false, message: 'The transaction could not be undone.' };
+    }
+    dispatch({ type: 'plan-transaction/revert', transaction });
+    setLastTransaction(null);
+    return { ok: true };
+  }, []);
+
+  // Keep a ref so the revert guard reads the transaction that was validated,
+  // even if the state update from dispatch re-renders between calls.
+  const dismissUndo = useCallback(() => setLastTransaction(null), []);
+
   const checkReadiness = useCallback(() => {
-    const analysis = analyzeJourney(state.artifacts, state.zones);
-    const result = evaluateReadiness(state, analysis);
+    const current = stateRef.current;
+    const analysis = analyzeJourney(current.artifacts, current.zones);
+    const result = evaluateReadiness(current, analysis);
     dispatch({ type: 'project/readiness', ready: result.ready, checkedAt: result.checkedAt });
     return result;
-  }, [state]);
+  }, []);
 
   const createSnapshot = useCallback((): CommandResult<Snapshot> => {
-    const analysis = analyzeJourney(state.artifacts, state.zones);
-    const readiness = evaluateReadiness(state, analysis);
+    const current = stateRef.current;
+    const analysis = analyzeJourney(current.artifacts, current.zones);
+    const readiness = evaluateReadiness(current, analysis);
     if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
-    return { ok: true, value: buildSnapshot(state, analysis, readiness) };
-  }, [state]);
+    return { ok: true, value: buildSnapshot(current, analysis, readiness) };
+  }, []);
 
-  const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
+  const resetWorkspace = useCallback(() => {
+    setLastTransaction(null);
+    dispatch({ type: 'workspace/reset', state: createSeedWorkspace() });
+  }, []);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
+    lastTransaction,
     upsertArtifact,
     removeArtifact,
     assignArtifact,
@@ -149,10 +245,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     addIssue,
     transitionReviewIssue,
     updatePreferences,
+    prepareBatch,
+    commitBatch,
+    undoLastTransaction,
+    dismissUndo,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, lastTransaction, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, prepareBatch, commitBatch, undoLastTransaction, dismissUndo, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

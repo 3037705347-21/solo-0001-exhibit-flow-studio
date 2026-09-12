@@ -19,6 +19,9 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'plan-transaction/commit': return `Applied ${action.preview.suggestionIds.length} planning ${action.preview.suggestionIds.length === 1 ? 'suggestion' : 'suggestions'}`;
+    case 'plan-transaction/revert': return 'Reverted a planning transaction';
+    case 'workspace/sync-external': return 'Adopted plan changes from another tab';
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }

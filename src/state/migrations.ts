@@ -16,6 +16,7 @@ interface LegacyZone {
 
 interface LegacyWorkspace {
   version?: number;
+  revision?: number;
   project?: WorkspaceState['project'];
   artifacts?: WorkspaceState['artifacts'];
   zones?: LegacyZone[];
@@ -34,6 +35,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
   }));
   return {
     version: 1,
+    revision: typeof source.revision === 'number' && source.revision > 0 ? source.revision : 1,
     project: source.project,
     artifacts: source.artifacts,
     zones,

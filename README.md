@@ -27,7 +27,7 @@ npm run check       # all checks in sequence
 - `src/features/collection`: searchable object library and validated editor.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
 - `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
-- `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
+- `src/features/insights`: non-mutating visitor scenario controls, selectable planning suggestions, and atomic batch review with undo.
 - `src/components`: shared shell, navigation, forms, badges, metrics, dialogs, and visual primitives.
 
 ## Inputs and outputs
@@ -39,3 +39,7 @@ npm run check       # all checks in sequence
 ## Design notes
 
 State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.
+
+## Planning transactions
+
+Insights suggestions are prepared against a monotonically increasing plan `revision`. Selecting several suggestions opens a batch review that lists the plan facts each change writes, cross-suggestion dependencies, combination conflicts, and the predicted visit metrics. On commit the whole batch is validated again against the live state: a version conflict (for example an edit saved in another browser tab), a missing object or zone, or any capacity relationship that no longer holds rejects the entire batch, so no partial preferences are ever written. A successful commit applies in one revision bump and can be undone in a single step; undo is refused when a fact it would restore was edited again after the transaction.

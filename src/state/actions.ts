@@ -1,3 +1,4 @@
+import type { PlanBatchPreview, PlanTransaction } from '../domain/planTransaction';
 import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
 
 export type WorkspaceAction =
@@ -10,4 +11,7 @@ export type WorkspaceAction =
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
+  | { type: 'plan-transaction/commit'; preview: Pick<PlanBatchPreview, 'suggestionIds' | 'baseRevision' | 'suggestions'>; transactionId: string; at?: Date }
+  | { type: 'plan-transaction/revert'; transaction: PlanTransaction; at?: Date }
+  | { type: 'workspace/sync-external'; state: WorkspaceState }
   | { type: 'workspace/reset'; state: WorkspaceState };

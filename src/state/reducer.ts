@@ -1,9 +1,10 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { PlanTransactionError, commitPlanTransaction, revertPlanTransaction } from '../domain/planTransaction';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
 function stamp(state: WorkspaceState): WorkspaceState {
-  return { ...state, lastSavedAt: new Date().toISOString() };
+  return { ...state, revision: state.revision + 1, lastSavedAt: new Date().toISOString() };
 }
 
 function removeArtifactFromZones(state: WorkspaceState, artifactId: string): WorkspaceState {
@@ -95,6 +96,34 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'plan-transaction/commit': {
+      // Defensive re-validation inside the reducer: the commit path validates
+      // twice (command layer and here) and an invalid batch is rejected whole,
+      // so a partial set of changes can never reach the state.
+      try {
+        const { state: next } = commitPlanTransaction(
+          state,
+          action.preview,
+          { id: action.transactionId, at: action.at },
+        );
+        return next;
+      } catch (error) {
+        if (error instanceof PlanTransactionError) return state;
+        throw error;
+      }
+    }
+    case 'plan-transaction/revert': {
+      try {
+        return revertPlanTransaction(state, action.transaction, { at: action.at });
+      } catch (error) {
+        if (error instanceof PlanTransactionError) return state;
+        throw error;
+      }
+    }
+    case 'workspace/sync-external':
+      // Another browser tab persisted a newer plan. Adopt it wholesale; the
+      // optimistic revision guard protects prepared batches.
+      return action.state;
     case 'workspace/reset':
       return action.state;
     default:

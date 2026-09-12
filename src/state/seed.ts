@@ -3,6 +3,7 @@ import type { WorkspaceState } from '../domain/models';
 export function createSeedWorkspace(): WorkspaceState {
   return {
     version: 1,
+    revision: 1,
     project: {
       id: 'project-afterlight',
       title: 'Afterlight: Material Memory',
