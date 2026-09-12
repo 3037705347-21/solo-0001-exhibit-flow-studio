@@ -63,9 +63,10 @@ export function InsightsPage() {
   };
 
   const discard = () => {
-    clearScenarioDraft();
-    setDirty(false);
-    setRecoveryOpen(false);
+    // Abandoning the recovered draft also returns the controls to the saved
+    // profile, so nothing unapplied remains and the discarded values can no
+    // longer be committed.
+    revert();
   };
 
   const commit = (version: string) => {

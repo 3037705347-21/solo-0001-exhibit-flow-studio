@@ -49,6 +49,23 @@ test('discards a recovered draft without applying it', async ({ page }) => {
   await expect(page.getByText(/Saved profile:/)).toContainText('Balanced');
 });
 
+test('resets controls and disables apply the moment a draft is discarded', async ({ page }) => {
+  await page.goto('/insights');
+  await page.getByRole('button', { name: 'Focused' }).click();
+  await page.getByLabel('Group size').fill('14');
+  await page.reload();
+  await expect(page.getByText('Recovered an unsaved scenario draft')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Focused' })).toHaveClass(/selected/);
+  await expect(page.getByLabel('Group size')).toHaveValue('14');
+  await expect(page.getByRole('button', { name: 'Apply preferences' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByText('Recovered an unsaved scenario draft')).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Balanced' })).toHaveClass(/selected/);
+  await expect(page.getByLabel('Group size')).toHaveValue('6');
+  await expect(page.getByText('Unapplied scenario changes')).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Apply preferences' })).toBeDisabled();
+});
+
 test('requires reconfirmation when the plan changes before applying', async ({ page }) => {
   await page.goto('/insights');
   await page.getByLabel('Group size').fill('14');
