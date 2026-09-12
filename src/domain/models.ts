@@ -1,9 +1,13 @@
+import type { RuleBinding, RuleProfile } from './ruleProfiles';
+
 export type ProjectStage = 'draft' | 'review' | 'ready';
 export type NarrativeRole = 'threshold' | 'context' | 'turning-point' | 'reflection';
 export type Sensitivity = 'standard' | 'low-light' | 'fragile';
 export type IssueSeverity = 'note' | 'warning' | 'critical';
 export type IssueStatus = 'open' | 'in-progress' | 'resolved';
 export type AccessibilityNeed = 'none' | 'seating' | 'audio' | 'tactile-alternative';
+
+export type { RuleBinding, RuleProfile } from './ruleProfiles';
 
 export interface Dimensions {
   width: number;
@@ -75,15 +79,21 @@ export interface ExhibitProject {
   openingDate: string;
   stage: ProjectStage;
   lastReadinessCheck?: string;
+  /** Exact review rule archive version this plan is interpreted against. */
+  ruleBinding?: RuleBinding;
 }
 
 export interface WorkspaceState {
-  version: 1;
+  version: 2;
   project: ExhibitProject;
   artifacts: Artifact[];
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  /** Immutable rule archive; new versions are appended, existing entries never edited. */
+  ruleProfiles: RuleProfile[];
+  /** History of readiness runs, each pinned to the archive version used for it. */
+  readinessRuns: ReadinessRun[];
   lastSavedAt?: string;
 }
 
@@ -150,6 +160,14 @@ export interface JourneyAnalysis {
   findings: ConstraintFinding[];
   blockingCount: number;
   warningCount: number;
+  /** Rule archive version this analysis was computed against. */
+  ruleArchive: RuleArchiveRef;
+}
+
+export interface RuleArchiveRef {
+  profileId: string;
+  version: number;
+  name: string;
 }
 
 export interface ReadinessResult {
@@ -158,6 +176,19 @@ export interface ReadinessResult {
   blockers: string[];
   cautions: string[];
   checkedAt: string;
+  /** Rule archive version this result was computed against. */
+  ruleArchive: RuleArchiveRef;
+}
+
+/** A persisted readiness check pinned to the rule archive version used then. */
+export interface ReadinessRun {
+  id: string;
+  checkedAt: string;
+  ready: boolean;
+  score: number;
+  blockers: string[];
+  cautions: string[];
+  ruleArchive: RuleArchiveRef;
 }
 
 export interface ScenarioInput {
@@ -176,7 +207,7 @@ export interface ScenarioProjection {
 }
 
 export interface Snapshot {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
   project: ExhibitProject;
   summary: {
@@ -185,6 +216,10 @@ export interface Snapshot {
     visitMinutes: number;
     readinessScore: number;
   };
+  /** Exact rule archive version the readiness result was calculated against. */
+  ruleArchive: RuleArchiveRef;
+  /** Full readable profile embedded so the package stays self-describing. */
+  ruleProfile: RuleProfile;
   zones: Array<Zone & { artifacts: Artifact[] }>;
   unresolvedIssues: ReviewIssue[];
 }

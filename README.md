@@ -26,9 +26,19 @@ npm run check       # all checks in sequence
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
 - `src/features/collection`: searchable object library and validated editor.
 - `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
-- `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
+- `src/features/review`: finding lifecycle, readiness gate, versioned rule archive, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
 - `src/components`: shared shell, navigation, forms, badges, metrics, dialogs, and visual primitives.
+
+## Versioned review rule archive
+
+Capacity warning/block lines, density lines, low-light and seating enforcement, narrative-role requirements, key-object gating, critical-finding gating, and score penalties live in an immutable **rule profile** (`src/domain/ruleProfiles.ts`). Each workspace stores a growing archive of profile versions, and each project is **bound** to one exact version:
+
+- Changing a rule always appends a new immutable version (`rules/publish`); an existing version can never be edited. Publishing does **not** rebind the project.
+- Before switching to an existing version (or publishing a draft), the rules page dry-runs the current plan against the candidate and shows the exact impact (new/cleared blockers, warnings, score change). The switch is a separate explicit action; a ready plan regresses to review.
+- Old projects keep their bound version until explicitly upgraded, so later rule changes never reinterpret historical results.
+- Every readiness run is recorded in `readinessRuns` pinned to the `profileId#version` used. Published snapshots are schema v2: they embed both the `ruleArchive` reference and the full readable `ruleProfile`, and the readiness result must match the profile used to build the package. The zone checklist CSV also names the archive version.
+- On load, the binding is resolved explicitly. A missing binding, an unknown version, or a corrupt profile does **not** fall back to default thresholds: calculation surfaces show a blocking banner and readiness/snapshot commands refuse to run until the project is rebound to a version stored locally. v1 workspaces are migrated by pinning them to standard rules v1 (the historical hard-coded thresholds).
 
 ## Inputs and outputs
 

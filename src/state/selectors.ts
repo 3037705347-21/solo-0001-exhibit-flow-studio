@@ -1,5 +1,6 @@
 import { analyzeJourney, getUnplacedArtifacts } from '../domain/journeyAnalysis';
 import { issueProgress } from '../domain/reviewRules';
+import { resolveRuleProfile } from '../domain/ruleProfiles';
 import type { Artifact, ReviewIssue, WorkspaceState, Zone } from '../domain/models';
 
 export function selectArtifactById(state: WorkspaceState, id: string): Artifact | undefined {
@@ -28,7 +29,15 @@ export function selectIssuesForZone(state: WorkspaceState, zoneId: string): Revi
 }
 
 export function selectWorkspaceSummary(state: WorkspaceState) {
-  const analysis = analyzeJourney(state.artifacts, state.zones);
+  const resolution = resolveRuleProfile(state);
+  const analysis = resolution.profile
+    ? analyzeJourney(
+      state.artifacts,
+      state.zones,
+      resolution.profile.parameters,
+      { profileId: resolution.profile.profileId, version: resolution.profile.version, name: resolution.profile.name },
+    )
+    : null;
   return {
     analysis,
     unplacedArtifacts: getUnplacedArtifacts(state.artifacts, state.zones),

@@ -3,9 +3,30 @@ import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactVali
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import { previewRuleImpact, type RuleImpactReport } from '../domain/ruleImpact';
+import {
+  cloneParameters,
+  draftNextVersion,
+  findProfile,
+  isValidRuleParameters,
+  resolveRuleProfile,
+  type RuleParameters,
+  type RuleProfile,
+} from '../domain/ruleProfiles';
+import type {
+  Artifact,
+  ArtifactDraft,
+  IssueDraft,
+  IssueStatus,
+  PlanningPreferences,
+  ReadinessResult,
+  ReadinessRun,
+  RuleBinding,
+  Snapshot,
+  WorkspaceState,
+} from '../domain/models';
 import { workspaceReducer } from './reducer';
-import { loadWorkspace, saveWorkspace } from './persistence';
+import { loadWorkspaceResult, rebindWorkspace, saveWorkspace, type WorkspaceLoadProblem } from './persistence';
 import { createSeedWorkspace } from './seed';
 
 interface CommandResult<T = undefined> {
@@ -15,9 +36,19 @@ interface CommandResult<T = undefined> {
   message?: string;
 }
 
+export interface PublishRulesInput {
+  parameters: RuleParameters;
+  changeSummary: string;
+  name?: string;
+}
+
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
+  loadProblems: WorkspaceLoadProblem[];
+  /** Resolved bound archive; status is never assumed — missing versions stay unresolved. */
+  ruleResolution: ReturnType<typeof resolveRuleProfile>;
+  boundProfile?: RuleProfile;
   upsertArtifact: (draft: ArtifactDraft, existing?: Artifact) => CommandResult<Artifact>;
   removeArtifact: (artifactId: string) => CommandResult;
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
@@ -26,20 +57,30 @@ interface WorkspaceContextValue {
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
-  checkReadiness: () => ReadinessResult;
+  checkReadiness: () => CommandResult<ReadinessResult>;
   createSnapshot: () => CommandResult<Snapshot>;
+  /** Dry-run a candidate (existing version or draft) against the current plan. */
+  previewImpact: (candidate: RuleProfile) => CommandResult<RuleImpactReport>;
+  publishRuleVersion: (input: PublishRulesInput) => CommandResult<RuleProfile>;
+  switchRuleVersion: (profileId: string, version: number) => CommandResult;
+  repairRuleBinding: (profileId: string, version: number) => CommandResult;
   resetWorkspace: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(workspaceReducer, undefined, () => loadWorkspace());
+  const [initial] = useState(() => loadWorkspaceResult());
+  const [state, dispatch] = useReducer(workspaceReducer, initial.state);
+  const [loadProblems] = useState<WorkspaceLoadProblem[]>(initial.problems);
   const [storageHealthy, setStorageHealthy] = useState(true);
 
   useEffect(() => {
     setStorageHealthy(saveWorkspace(state));
   }, [state]);
+
+  const ruleResolution = useMemo(() => resolveRuleProfile(state), [state]);
+  const boundProfile = ruleResolution.status === 'resolved' ? ruleResolution.profile : undefined;
 
   const upsertArtifact = useCallback((draft: ArtifactDraft, existing?: Artifact): CommandResult<Artifact> => {
     const validation = validateArtifactDraft(draft, state.artifacts, existing?.id);
@@ -122,18 +163,89 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'preferences/update', preferences });
   }, []);
 
-  const checkReadiness = useCallback(() => {
-    const analysis = analyzeJourney(state.artifacts, state.zones);
-    const result = evaluateReadiness(state, analysis);
-    dispatch({ type: 'project/readiness', ready: result.ready, checkedAt: result.checkedAt });
-    return result;
-  }, [state]);
+  const checkReadiness = useCallback((): CommandResult<ReadinessResult> => {
+    if (!boundProfile) {
+      return { ok: false, message: `Cannot evaluate readiness: ${ruleResolution.reason}` };
+    }
+    const analysis = analyzeJourney(
+      state.artifacts,
+      state.zones,
+      boundProfile.parameters,
+      { profileId: boundProfile.profileId, version: boundProfile.version, name: boundProfile.name },
+    );
+    const result = evaluateReadiness(state, analysis, boundProfile);
+    const run: ReadinessRun = {
+      id: createId('run'),
+      checkedAt: result.checkedAt,
+      ready: result.ready,
+      score: result.score,
+      blockers: result.blockers,
+      cautions: result.cautions,
+      ruleArchive: result.ruleArchive,
+    };
+    dispatch({ type: 'project/readiness', ready: result.ready, checkedAt: result.checkedAt, run });
+    return { ok: true, value: result };
+  }, [state, boundProfile, ruleResolution.reason]);
 
   const createSnapshot = useCallback((): CommandResult<Snapshot> => {
-    const analysis = analyzeJourney(state.artifacts, state.zones);
-    const readiness = evaluateReadiness(state, analysis);
+    if (!boundProfile) {
+      return { ok: false, message: `Cannot publish: ${ruleResolution.reason}` };
+    }
+    const analysis = analyzeJourney(
+      state.artifacts,
+      state.zones,
+      boundProfile.parameters,
+      { profileId: boundProfile.profileId, version: boundProfile.version, name: boundProfile.name },
+    );
+    const readiness = evaluateReadiness(state, analysis, boundProfile);
     if (!readiness.ready) return { ok: false, message: readiness.blockers[0] ?? 'The plan is not ready.' };
-    return { ok: true, value: buildSnapshot(state, analysis, readiness) };
+    const snapshot = buildSnapshot(state, analysis, readiness, boundProfile);
+    return { ok: true, value: snapshot };
+  }, [state, boundProfile, ruleResolution.reason]);
+
+  const previewImpact = useCallback((candidate: RuleProfile): CommandResult<RuleImpactReport> => {
+    // Drafts carry a provisional version number, so validate the thresholds
+    // themselves rather than the full (immutable, published) profile shape.
+    if (!isValidRuleParameters(candidate.parameters)) return { ok: false, message: 'The candidate rule thresholds are not valid.' };
+    if (!boundProfile) return { ok: false, message: `Cannot preview impact: ${ruleResolution.reason}` };
+    const report = previewRuleImpact(state, boundProfile, candidate);
+    return { ok: true, value: report };
+  }, [state, boundProfile, ruleResolution.reason]);
+
+  const publishRuleVersion = useCallback((input: PublishRulesInput): CommandResult<RuleProfile> => {
+    if (!boundProfile) return { ok: false, message: `Cannot publish rules: ${ruleResolution.reason}` };
+    if (!input.changeSummary.trim()) {
+      return { ok: false, errors: { changeSummary: 'Describe what changed in this version.' } };
+    }
+    if (!isValidRuleParameters(input.parameters)) {
+      return { ok: false, message: 'The rule thresholds are not valid.' };
+    }
+    const profile = draftNextVersion(
+      state.ruleProfiles,
+      boundProfile,
+      { parameters: cloneParameters(input.parameters), changeSummary: input.changeSummary, name: input.name },
+    );
+    dispatch({ type: 'rules/publish', profile });
+    return { ok: true, value: profile };
+  }, [state.ruleProfiles, boundProfile, ruleResolution.reason]);
+
+  const switchRuleVersion = useCallback((profileId: string, version: number): CommandResult => {
+    const target = findProfile(state.ruleProfiles, profileId, version);
+    if (!target) return { ok: false, message: `Archive version ${profileId}#${version} is not stored in this workspace.` };
+    try {
+      const binding: RuleBinding = { profileId, version, boundAt: new Date().toISOString() };
+      dispatch({ type: 'rules/bind', binding });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Rule version could not be switched.' };
+    }
+  }, [state.ruleProfiles]);
+
+  const repairRuleBinding = useCallback((profileId: string, version: number): CommandResult => {
+    const repaired = rebindWorkspace(state, profileId, version);
+    if (!repaired || !repaired.project.ruleBinding) return { ok: false, message: 'Choose an archive version present in this workspace.' };
+    dispatch({ type: 'rules/repair', binding: repaired.project.ruleBinding });
+    return { ok: true };
   }, [state]);
 
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
@@ -141,6 +253,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<WorkspaceContextValue>(() => ({
     state,
     storageHealthy,
+    loadProblems,
+    ruleResolution,
+    boundProfile,
     upsertArtifact,
     removeArtifact,
     assignArtifact,
@@ -151,8 +266,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    previewImpact,
+    publishRuleVersion,
+    switchRuleVersion,
+    repairRuleBinding,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, loadProblems, ruleResolution, boundProfile, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, previewImpact, publishRuleVersion, switchRuleVersion, repairRuleBinding, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

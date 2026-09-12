@@ -19,6 +19,9 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'rules/publish': return `Published rule archive ${action.profile.profileId}#${action.profile.version}`;
+    case 'rules/bind': return `Bound project to rule archive ${action.binding.profileId}#${action.binding.version}`;
+    case 'rules/repair': return `Repaired rule archive binding to ${action.binding.profileId}#${action.binding.version}`;
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }

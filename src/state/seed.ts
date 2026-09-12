@@ -1,8 +1,10 @@
 import type { WorkspaceState } from '../domain/models';
+import { standardRuleProfile } from '../domain/ruleProfiles';
 
 export function createSeedWorkspace(): WorkspaceState {
+  const standardRules = standardRuleProfile(new Date('2026-08-01T09:00:00.000Z'));
   return {
-    version: 1,
+    version: 2,
     project: {
       id: 'project-afterlight',
       title: 'Afterlight: Material Memory',
@@ -10,6 +12,11 @@ export function createSeedWorkspace(): WorkspaceState {
       audience: 'General visitors, age 12+',
       openingDate: '2027-03-18',
       stage: 'review',
+      ruleBinding: {
+        profileId: standardRules.profileId,
+        version: standardRules.version,
+        boundAt: '2026-08-01T09:00:00.000Z',
+      },
     },
     artifacts: [
       {
@@ -270,6 +277,8 @@ export function createSeedWorkspace(): WorkspaceState {
       accessibilityPriority: 70,
       groupSize: 6,
     },
+    ruleProfiles: [standardRules],
+    readinessRuns: [],
     lastSavedAt: '2026-09-01T14:30:00.000Z',
   };
 }

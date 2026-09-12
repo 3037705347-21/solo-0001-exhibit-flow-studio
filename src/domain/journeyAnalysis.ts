@@ -1,20 +1,20 @@
-import type { Artifact, ConstraintFinding, JourneyAnalysis, NarrativeRole, Zone, ZoneAnalysis } from './models';
-
-const ALL_ROLES: NarrativeRole[] = ['threshold', 'context', 'turning-point', 'reflection'];
+import type { RuleParameters } from './ruleProfiles';
+import type { Artifact, ConstraintFinding, JourneyAnalysis, NarrativeRole, RuleArchiveRef, Zone, ZoneAnalysis } from './models';
+import { ALL_NARRATIVE_ROLES } from './ruleProfiles';
 
 function zoneArtifacts(zone: Zone, artifacts: Artifact[]): Artifact[] {
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
   return zone.artifactIds.map((id) => byId.get(id)).filter((artifact): artifact is Artifact => Boolean(artifact));
 }
 
-function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
+function analyzeZone(zone: Zone, artifacts: Artifact[], rules: RuleParameters): ZoneAnalysis {
   const placed = zoneArtifacts(zone, artifacts);
   const dwellMinutes = placed.reduce((total, artifact) => total + artifact.dwellMinutes, 0);
   const utilization = zone.capacityMinutes ? dwellMinutes / zone.capacityMinutes : 0;
   const objectUtilization = zone.maxObjects ? placed.length / zone.maxObjects : 0;
   const findings: ConstraintFinding[] = [];
 
-  if (utilization > 1) {
+  if (utilization > rules.capacityBlockAt) {
     findings.push({
       id: `capacity-${zone.id}`,
       type: 'error',
@@ -22,7 +22,7 @@ function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
       detail: `${dwellMinutes} minutes planned against a ${zone.capacityMinutes} minute target.`,
       zoneId: zone.id,
     });
-  } else if (utilization >= 0.8) {
+  } else if (utilization >= rules.capacityWarnAt) {
     findings.push({
       id: `capacity-warning-${zone.id}`,
       type: 'warning',
@@ -32,7 +32,7 @@ function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
     });
   }
 
-  if (objectUtilization > 1) {
+  if (objectUtilization > rules.densityBlockAt) {
     findings.push({
       id: `density-${zone.id}`,
       type: 'error',
@@ -40,7 +40,7 @@ function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
       detail: `${placed.length} objects are placed against a limit of ${zone.maxObjects}.`,
       zoneId: zone.id,
     });
-  } else if (objectUtilization >= 0.8) {
+  } else if (objectUtilization >= rules.densityWarnAt) {
     findings.push({
       id: `density-warning-${zone.id}`,
       type: 'warning',
@@ -51,7 +51,7 @@ function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
   }
 
   for (const artifact of placed) {
-    if (artifact.sensitivity === 'low-light' && !zone.lowLight) {
+    if (rules.enforceLowLight && artifact.sensitivity === 'low-light' && !zone.lowLight) {
       findings.push({
         id: `light-${zone.id}-${artifact.id}`,
         type: 'error',
@@ -61,10 +61,10 @@ function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
         artifactId: artifact.id,
       });
     }
-    if (artifact.accessibilityNeed === 'seating' && !zone.hasSeating) {
+    if (rules.enforceSeating && artifact.accessibilityNeed === 'seating' && !zone.hasSeating) {
       findings.push({
         id: `seating-${zone.id}-${artifact.id}`,
-        type: 'warning',
+        type: rules.seatingSeverity,
         title: `${artifact.title} needs seated interpretation`,
         detail: `Add seating to ${zone.name} or move the object to a seated zone.`,
         zoneId: zone.id,
@@ -95,9 +95,9 @@ function analyzeZone(zone: Zone, artifacts: Artifact[]): ZoneAnalysis {
   };
 }
 
-export function analyzeJourney(artifacts: Artifact[], zones: Zone[]): JourneyAnalysis {
+export function analyzeJourney(artifacts: Artifact[], zones: Zone[], rules: RuleParameters, ruleArchive: RuleArchiveRef): JourneyAnalysis {
   const sequenceZones = [...zones].sort((a, b) => a.sequence - b.sequence);
-  const zoneAnalyses = sequenceZones.map((zone) => analyzeZone(zone, artifacts));
+  const zoneAnalyses = sequenceZones.map((zone) => analyzeZone(zone, artifacts, rules));
   const placedIds = new Set(zones.flatMap((zone) => zone.artifactIds));
   const keyObjects = artifacts.filter((artifact) => artifact.isKeyObject);
   const placedKeyObjects = keyObjects.filter((artifact) => placedIds.has(artifact.id));
@@ -106,26 +106,28 @@ export function analyzeJourney(artifacts: Artifact[], zones: Zone[]): JourneyAna
   );
   const findings = zoneAnalyses.flatMap((zone) => zone.findings);
 
-  for (const role of ALL_ROLES) {
+  for (const role of rules.requiredRoles) {
     if (!placedRoles.has(role)) {
       findings.push({
         id: `missing-role-${role}`,
-        type: role === 'turning-point' ? 'error' : 'warning',
+        type: role === rules.blockingRole ? 'error' : 'warning',
         title: `Missing ${role.replace('-', ' ')} role`,
         detail: 'Assign at least one placed object to this narrative role before final review.',
       });
     }
   }
 
-  const unplacedKeyObjects = keyObjects.filter((artifact) => !placedIds.has(artifact.id));
-  for (const artifact of unplacedKeyObjects) {
-    findings.push({
-      id: `unplaced-key-${artifact.id}`,
-      type: 'error',
-      title: `Key object is not in the journey`,
-      detail: `${artifact.title} is marked as a key object and must be placed.`,
-      artifactId: artifact.id,
-    });
+  if (rules.requireKeyObjectsPlaced) {
+    const unplacedKeyObjects = keyObjects.filter((artifact) => !placedIds.has(artifact.id));
+    for (const artifact of unplacedKeyObjects) {
+      findings.push({
+        id: `unplaced-key-${artifact.id}`,
+        type: 'error',
+        title: `Key object is not in the journey`,
+        detail: `${artifact.title} is marked as a key object and must be placed.`,
+        artifactId: artifact.id,
+      });
+    }
   }
 
   return {
@@ -133,11 +135,12 @@ export function analyzeJourney(artifacts: Artifact[], zones: Zone[]): JourneyAna
     placedCount: placedIds.size,
     unplacedCount: artifacts.filter((artifact) => !placedIds.has(artifact.id)).length,
     keyObjectCoverage: keyObjects.length ? placedKeyObjects.length / keyObjects.length : 1,
-    roleCoverage: placedRoles.size / ALL_ROLES.length,
+    roleCoverage: placedRoles.size / ALL_NARRATIVE_ROLES.length,
     zones: zoneAnalyses,
     findings,
     blockingCount: findings.filter((finding) => finding.type === 'error').length,
     warningCount: findings.filter((finding) => finding.type === 'warning').length,
+    ruleArchive,
   };
 }
 
@@ -146,9 +149,9 @@ export function getUnplacedArtifacts(artifacts: Artifact[], zones: Zone[]): Arti
   return artifacts.filter((artifact) => !placedIds.has(artifact.id));
 }
 
-export function canPlaceArtifact(artifact: Artifact, zone: Zone): ConstraintFinding[] {
+export function canPlaceArtifact(artifact: Artifact, zone: Zone, rules: RuleParameters): ConstraintFinding[] {
   const findings: ConstraintFinding[] = [];
-  if (artifact.sensitivity === 'low-light' && !zone.lowLight) {
+  if (rules.enforceLowLight && artifact.sensitivity === 'low-light' && !zone.lowLight) {
     findings.push({
       id: `preview-light-${artifact.id}-${zone.id}`,
       type: 'error',
@@ -158,10 +161,10 @@ export function canPlaceArtifact(artifact: Artifact, zone: Zone): ConstraintFind
       artifactId: artifact.id,
     });
   }
-  if (artifact.accessibilityNeed === 'seating' && !zone.hasSeating) {
+  if (rules.enforceSeating && artifact.accessibilityNeed === 'seating' && !zone.hasSeating) {
     findings.push({
       id: `preview-seating-${artifact.id}-${zone.id}`,
-      type: 'warning',
+      type: rules.seatingSeverity,
       title: 'Seating requirement',
       detail: `${artifact.title} benefits from seated interpretation.`,
       zoneId: zone.id,
@@ -169,4 +172,8 @@ export function canPlaceArtifact(artifact: Artifact, zone: Zone): ConstraintFind
     });
   }
   return findings;
+}
+
+export function allNarrativeRoles(): NarrativeRole[] {
+  return [...ALL_NARRATIVE_ROLES];
 }

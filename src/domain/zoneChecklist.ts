@@ -1,6 +1,7 @@
 import { sortZones } from './filters';
 import { formatMinutes } from './formatters';
-import type { IssueSeverity, IssueStatus, WorkspaceState, Zone } from './models';
+import { profileLabel, resolveRuleProfile } from './ruleProfiles';
+import type { IssueSeverity, IssueStatus, RuleArchiveRef, WorkspaceState, Zone } from './models';
 
 export interface ChecklistFinding {
   severity: IssueSeverity;
@@ -27,6 +28,8 @@ export interface ZoneChecklist {
   projectTitle: string;
   venue: string;
   generatedAt: string;
+  /** Rule archive version the checklist findings were evaluated against. */
+  ruleArchive: RuleArchiveRef;
   totalDwellMinutes: number;
   objectCount: number;
   unresolvedCount: number;
@@ -37,6 +40,9 @@ export interface ZoneChecklist {
 export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = new Date()): ZoneChecklist | null {
   const zone = sortZones(state.zones).find((candidate) => candidate.id === zoneId);
   if (!zone) return null;
+  const resolution = resolveRuleProfile(state);
+  if (!resolution.profile) return null;
+  const rules = resolution.profile;
 
   const artifactById = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
   const unresolved = state.issues.filter((issue) => issue.status !== 'resolved');
@@ -81,6 +87,7 @@ export function buildZoneChecklist(state: WorkspaceState, zoneId: string, at = n
     projectTitle: state.project.title,
     venue: state.project.venue,
     generatedAt: at.toISOString(),
+    ruleArchive: { profileId: rules.profileId, version: rules.version, name: rules.name },
     totalDwellMinutes: entries.reduce((total, entry) => total + entry.dwellMinutes, 0),
     objectCount: entries.length,
     unresolvedCount: zoneFindings.length + linkedIssueIds.size,
@@ -121,6 +128,7 @@ export function serializeZoneChecklistCsv(checklist: ZoneChecklist): string {
     `Venue,${csvCell(checklist.venue)}`,
     `Zone,${csvCell(checklist.zoneName)}`,
     `Thesis,${csvCell(checklist.thesis)}`,
+    `Rule archive,${csvCell(`${profileLabel(checklist.ruleArchive)} (${checklist.ruleArchive.profileId}#${checklist.ruleArchive.version})`)}`,
     `Generated,${csvCell(checklist.generatedAt)}`,
     '',
     ['Order', 'Accession ID', 'Object', 'Dwell (min)', 'Unresolved findings'].map(csvCell).join(','),

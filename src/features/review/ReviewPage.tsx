@@ -1,5 +1,6 @@
-import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, ListChecks, MapPin, Plus, RotateCcw, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, ClipboardCheck, Clock, Download, FileWarning, GitBranch, History, ListChecks, MapPin, Plus, RotateCcw, ScrollText, Send, ShieldAlert, Sparkles, UserRound, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
@@ -11,20 +12,32 @@ import { downloadTextFile } from '../../domain/export';
 import { sortZones } from '../../domain/filters';
 import { formatDate, formatMinutes, titleCase } from '../../domain/formatters';
 import { analyzeJourney } from '../../domain/journeyAnalysis';
-import type { IssueDraft, IssueSeverity, IssueStatus, ReviewIssue } from '../../domain/models';
+import type { IssueDraft, IssueSeverity, IssueStatus, ReadinessResult, ReviewIssue } from '../../domain/models';
 import { evaluateReadiness } from '../../domain/reviewRules';
+import { profileLabel } from '../../domain/ruleProfiles';
 import { buildZoneChecklist, serializeZoneChecklistCsv, zoneChecklistFileName } from '../../domain/zoneChecklist';
 import { loadReviewUi, saveReviewUi, type ReviewUiState } from '../../state/persistence';
 import { useWorkspace } from '../../state/WorkspaceContext';
+import { RuleArchiveBanner } from '../shared/RuleArchiveBanner';
 
 type StatusFilter = IssueStatus | 'all';
 const STATUS_FILTERS: StatusFilter[] = ['all', 'open', 'in-progress', 'resolved'];
 
 export function ReviewPage() {
-  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot } = useWorkspace();
+  const { state, addIssue, transitionReviewIssue, checkReadiness, createSnapshot, boundProfile } = useWorkspace();
   const [reviewUi, setReviewUi] = useState<ReviewUiState>(() => loadReviewUi());
   const [showModal, setShowModal] = useState(false);
-  const [readiness, setReadiness] = useState(() => evaluateReadiness(state, analyzeJourney(state.artifacts, state.zones)));
+  const liveReadiness = useMemo<ReadinessResult | null>(() => {
+    if (!boundProfile) return null;
+    const analysis = analyzeJourney(
+      state.artifacts,
+      state.zones,
+      boundProfile.parameters,
+      { profileId: boundProfile.profileId, version: boundProfile.version, name: boundProfile.name },
+    );
+    return evaluateReadiness(state, analysis, boundProfile);
+  }, [state, boundProfile]);
+  const [readiness, setReadiness] = useState<ReadinessResult | null>(liveReadiness);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => { saveReviewUi(reviewUi); }, [reviewUi]);
@@ -50,14 +63,18 @@ export function ReviewPage() {
     resolved: scopedIssues.filter((issue) => issue.status === 'resolved').length,
   };
   const filtered = scopedIssues.filter((issue) => filter === 'all' || issue.status === filter);
-  const checklist = selectedZone ? buildZoneChecklist(state, selectedZone.id) : null;
+  const checklist = selectedZone && boundProfile ? buildZoneChecklist(state, selectedZone.id) : null;
 
-  const runCheck = () => setReadiness(checkReadiness());
+  const runCheck = () => {
+    const result = checkReadiness();
+    if (!result.ok || !result.value) { notify(result.message ?? 'Readiness cannot be evaluated.'); return; }
+    setReadiness(result.value);
+  };
   const exportSnapshot = () => {
     const result = createSnapshot();
     if (!result.ok || !result.value) { notify(result.message ?? 'Resolve blockers before exporting.'); return; }
     downloadTextFile(JSON.stringify(result.value, null, 2), `exhibit-flow-snapshot-${new Date().toISOString().slice(0, 10)}.json`);
-    notify('Snapshot downloaded.');
+    notify('Snapshot downloaded with the bound rule archive embedded.');
   };
   const exportChecklist = () => {
     if (!selectedZone || !checklist) return;
@@ -65,9 +82,14 @@ export function ReviewPage() {
     notify('Zone checklist downloaded.');
   };
 
-  return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
-    <section className={`readiness-card ${readiness.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{readiness.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {readiness.checkedAt ? formatDate(readiness.checkedAt) : 'not run'}</div><h2>{readiness.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{readiness.ready ? 'The journey and review desk have no blocking conditions.' : `${readiness.blockers.length} blocking condition${readiness.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{readiness.score}</strong><span>readiness score</span></div><div className="readiness-actions">{readiness.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>
-    {!readiness.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING</div>{readiness.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
+  const shown = readiness ?? liveReadiness;
+
+  return <div className="page-stack"><SectionHeader eyebrow="QUALITY GATE" title="Review desk" description="Turn open questions into resolved decisions, then run the final readiness check." actions={<div className="header-button-row"><Link className="button button-secondary" to="/review/rules"><ScrollText size={16} /><span>Rule archive</span></Link><Button variant="secondary" icon={<ClipboardCheck size={16} />} onClick={runCheck} disabled={!boundProfile}>Run readiness check</Button><Button variant="primary" icon={<Plus size={17} />} onClick={() => setShowModal(true)}>New finding</Button></div>} />
+    {boundProfile && <div className="rule-archive-chip"><GitBranch size={14} /><span>Bound to <strong>{profileLabel(boundProfile)}</strong> — results are calculated against this version only</span></div>}
+    <RuleArchiveBanner />
+    {shown && boundProfile && <section className={`readiness-card ${shown.ready ? 'ready' : 'blocked'}`}><div className="readiness-icon">{shown.ready ? <CheckCircle2 size={28} /> : <ShieldAlert size={28} />}</div><div className="readiness-copy"><div className="eyebrow">READINESS CHECK · {shown.checkedAt ? formatDate(shown.checkedAt) : 'not run'} · <GitBranch size={12} /> v{shown.ruleArchive.version}</div><h2>{shown.ready ? 'Ready to share' : 'Still needs attention'}</h2><p>{shown.ready ? 'The journey and review desk have no blocking conditions.' : `${shown.blockers.length} blocking condition${shown.blockers.length === 1 ? '' : 's'} prevent this plan from being marked ready.`}</p></div><div className="readiness-score"><strong>{shown.score}</strong><span>readiness score</span></div><div className="readiness-actions">{shown.ready ? <Button variant="primary" icon={<Download size={16} />} onClick={exportSnapshot}>Export snapshot</Button> : <Button variant="secondary" icon={<RotateCcw size={16} />} onClick={runCheck}>Re-check plan</Button>}</div></section>}
+    {shown && !shown.ready && <section className="blocker-list"><div className="eyebrow">WHAT IS BLOCKING · RULES v{shown.ruleArchive.version}</div>{shown.blockers.map((blocker) => <div className="blocker-row" key={blocker}><XCircle size={16} /><span>{blocker}</span></div>)}</section>}
+    {state.readinessRuns.length > 0 && <ReadinessRunHistory />}
     <div className="review-summary"><div><span className="eyebrow">TOTAL FINDINGS</span><strong>{counts.all}</strong></div><div><span className="eyebrow">OPEN</span><strong className="text-danger">{counts.open}</strong></div><div><span className="eyebrow">IN PROGRESS</span><strong className="text-amber">{counts['in-progress']}</strong></div><div><span className="eyebrow">RESOLVED</span><strong className="text-teal">{counts.resolved}</strong></div></div>
     <div className="review-filters"><div className="review-zone-field"><SelectField label="Exhibition zone" value={selectedZone?.id ?? ''} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones — overview</option>{zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}</SelectField></div><span className="review-hint"><Sparkles size={14} /> {selectedZone ? 'Findings and the floor checklist are scoped to this zone.' : 'Critical findings block readiness'}</span></div>
     <div className="review-toolbar"><div className="segmented-control">{STATUS_FILTERS.map((status) => <button key={status} className={filter === status ? 'selected' : ''} onClick={() => setStatus(status)}>{titleCase(status)} <span>{counts[status]}</span></button>)}</div></div>
@@ -77,6 +99,21 @@ export function ReviewPage() {
     {showModal && <IssueEditor state={state} onClose={() => setShowModal(false)} onSave={(draft) => { const result = addIssue(draft); if (result.ok) setShowModal(false); return result; }} />}
     {toast && <div className="toast toast-positive"><Download size={16} />{toast}</div>}
   </div>;
+}
+
+function ReadinessRunHistory() {
+  const { state } = useWorkspace();
+  const runs = state.readinessRuns.slice(0, 5);
+  return <section className="rule-run-history compact">
+    <div className="panel-heading"><div><div className="eyebrow"><History size={13} /> PREVIOUS READINESS RESULTS</div><h2>Pinned to the archive version used at the time</h2></div></div>
+    <div className="rule-run-list horizontal">
+      {runs.map((run) => <article className={`rule-run-row ${run.ready ? 'is-ready' : 'is-blocked'}`} key={run.id}>
+        <div className="rule-run-status">{run.ready ? <CheckCircle2 size={16} /> : <XCircle size={16} />}</div>
+        <div className="rule-run-main"><strong>{run.ready ? 'Ready' : 'Blocked'} · {run.score}</strong><span>{formatDate(run.checkedAt)}</span></div>
+        <Badge tone="neutral"><GitBranch size={11} /> v{run.ruleArchive.version}</Badge>
+      </article>)}
+    </div>
+  </section>;
 }
 
 function ZoneChecklistCard({ checklist, onDownload }: { checklist: NonNullable<ReturnType<typeof buildZoneChecklist>>; onDownload: () => void }) {

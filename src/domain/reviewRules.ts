@@ -1,6 +1,13 @@
-import type { JourneyAnalysis, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from './models';
+import type { JourneyAnalysis, ReadinessResult, ReviewIssue, RuleArchiveRef, RuleProfile, Snapshot, WorkspaceState } from './models';
+import { bindingKey, profileLabel } from './ruleProfiles';
 
-export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalysis, at = new Date()): ReadinessResult {
+export function evaluateReadiness(
+  state: WorkspaceState,
+  analysis: JourneyAnalysis,
+  rules: RuleProfile,
+  at = new Date(),
+): ReadinessResult {
+  const parameters = rules.parameters;
   const blockers: string[] = [];
   const cautions: string[] = [];
   const unresolvedCritical = state.issues.filter(
@@ -13,20 +20,24 @@ export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalys
   if (analysis.blockingCount > 0) {
     blockers.push(`${analysis.blockingCount} blocking journey constraint${analysis.blockingCount === 1 ? '' : 's'} remain.`);
   }
-  if (unresolvedCritical.length > 0) {
+  if (parameters.criticalFindingsBlock && unresolvedCritical.length > 0) {
     blockers.push(`${unresolvedCritical.length} critical review finding${unresolvedCritical.length === 1 ? '' : 's'} remain unresolved.`);
   }
   if (analysis.placedCount === 0) blockers.push('The visitor journey has no placed objects.');
-  if (analysis.keyObjectCoverage < 1) blockers.push('Every key object must be placed in the journey.');
+  if (parameters.requireKeyObjectsPlaced && analysis.keyObjectCoverage < 1) blockers.push('Every key object must be placed in the journey.');
   if (analysis.roleCoverage < 1) blockers.push('The planned journey does not cover every narrative role.');
 
   if (analysis.warningCount > 0) cautions.push(`${analysis.warningCount} journey warning${analysis.warningCount === 1 ? '' : 's'} should be reviewed.`);
   if (unresolvedWarnings.length > 0) cautions.push(`${unresolvedWarnings.length} non-critical review finding${unresolvedWarnings.length === 1 ? '' : 's'} remain open.`);
   if (analysis.unplacedCount > 0) cautions.push(`${analysis.unplacedCount} collection object${analysis.unplacedCount === 1 ? '' : 's'} are not used.`);
+  if (!parameters.criticalFindingsBlock && unresolvedCritical.length > 0) {
+    cautions.push(`${unresolvedCritical.length} critical review finding${unresolvedCritical.length === 1 ? '' : 's'} are accepted as non-blocking under ${profileLabel(rules)}.`);
+  }
 
-  const blockerPenalty = blockers.length * 18;
-  const cautionPenalty = cautions.length * 6;
+  const blockerPenalty = blockers.length * parameters.blockerScorePenalty;
+  const cautionPenalty = cautions.length * parameters.cautionScorePenalty;
   const score = Math.max(0, Math.min(100, Math.round(100 - blockerPenalty - cautionPenalty)));
+  const ruleArchive: RuleArchiveRef = { profileId: rules.profileId, version: rules.version, name: rules.name };
 
   return {
     ready: blockers.length === 0,
@@ -34,16 +45,22 @@ export function evaluateReadiness(state: WorkspaceState, analysis: JourneyAnalys
     blockers,
     cautions,
     checkedAt: at.toISOString(),
+    ruleArchive,
   };
 }
 
-export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, readiness: ReadinessResult): Snapshot {
+export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, readiness: ReadinessResult, rules: RuleProfile): Snapshot {
   if (!readiness.ready) {
     throw new Error('A snapshot can only be created when the plan passes readiness checks.');
   }
+  const expectedKey = bindingKey({ profileId: rules.profileId, version: rules.version });
+  const actualKey = readiness.ruleArchive ? `${readiness.ruleArchive.profileId}#${readiness.ruleArchive.version}` : '';
+  if (actualKey !== expectedKey) {
+    throw new Error(`Refusing to publish: readiness was computed with ${actualKey || 'no rule archive'}, not ${expectedKey}.`);
+  }
   const artifactById = new Map(state.artifacts.map((artifact) => [artifact.id, artifact]));
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: readiness.checkedAt,
     project: { ...state.project, stage: 'ready', lastReadinessCheck: readiness.checkedAt },
     summary: {
@@ -52,6 +69,8 @@ export function buildSnapshot(state: WorkspaceState, analysis: JourneyAnalysis, 
       visitMinutes: analysis.totalDwellMinutes,
       readinessScore: readiness.score,
     },
+    ruleArchive: readiness.ruleArchive,
+    ruleProfile: rules,
     zones: [...state.zones]
       .sort((a, b) => a.sequence - b.sequence)
       .map((zone) => ({

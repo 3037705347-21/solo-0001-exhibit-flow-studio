@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { findProfile } from '../domain/ruleProfiles';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -52,6 +53,31 @@ function reorderArtifact(state: WorkspaceState, zoneId: string, artifactId: stri
   };
 }
 
+/** Append a freshly published archive version; an identical key may never overwrite history. */
+function publishProfile(state: WorkspaceState, profile: WorkspaceState['ruleProfiles'][number]): WorkspaceState {
+  if (findProfile(state.ruleProfiles, profile.profileId, profile.version)) {
+    throw new Error(`Rule archive ${profile.profileId}#${profile.version} already exists; versions are immutable.`);
+  }
+  return {
+    ...state,
+    ruleProfiles: [...state.ruleProfiles, profile],
+  };
+}
+
+/** Switch to an existing archive version. Ready plans regress because the gate changed. */
+function bindProfile(state: WorkspaceState, binding: WorkspaceState['project']['ruleBinding']): WorkspaceState {
+  if (!binding) throw new Error('A rule archive binding is required.');
+  if (!findProfile(state.ruleProfiles, binding.profileId, binding.version)) {
+    throw new Error(`Cannot bind to an archive version that is not stored here (${binding.profileId}#${binding.version}).`);
+  }
+  const current = state.project.ruleBinding;
+  if (current && current.profileId === binding.profileId && current.version === binding.version) return state;
+  return regressReadyProject({
+    ...state,
+    project: { ...state.project, ruleBinding: { ...binding } },
+  });
+}
+
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
     case 'artifact/upsert': {
@@ -94,7 +120,20 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           stage: action.ready ? 'ready' : 'review',
           lastReadinessCheck: action.checkedAt,
         },
+        readinessRuns: [action.run, ...state.readinessRuns].slice(0, 25),
       });
+    case 'rules/publish':
+      return stamp(publishProfile(state, action.profile));
+    case 'rules/bind':
+      return stamp(bindProfile(state, action.binding));
+    case 'rules/repair': {
+      const bound = bindProfile(state, action.binding);
+      // Repairing a broken load is an administrative fix; do not punish a ready stage.
+      return stamp({
+        ...bound,
+        project: { ...bound.project, stage: state.project.stage },
+      });
+    }
     case 'workspace/reset':
       return action.state;
     default:
