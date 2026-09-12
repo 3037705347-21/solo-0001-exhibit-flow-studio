@@ -1,4 +1,4 @@
-import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { regressReadyProject } from '../domain/transitions';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -76,13 +76,22 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
     case 'issue/add':
-      return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
+      return stamp(regressReadyProject({
+        ...state,
+        issues: [action.issue, ...state.issues],
+        issueHistory: [...state.issueHistory, action.revision],
+      }));
+    case 'issue/revise':
+      return stamp(regressReadyProject({
+        ...state,
+        issues: state.issues.map((issue) => (issue.id === action.issue.id ? action.issue : issue)),
+        issueHistory: [...state.issueHistory, action.revision],
+      }));
     case 'issue/transition':
       return stamp(regressReadyProject({
         ...state,
-        issues: state.issues.map((issue) =>
-          issue.id === action.issueId ? transitionIssue(issue, action.status, action.at) : issue,
-        ),
+        issues: state.issues.map((issue) => (issue.id === action.issue.id ? action.issue : issue)),
+        issueHistory: [...state.issueHistory, action.revision],
       }));
     case 'preferences/update':
       return stamp({ ...state, preferences: action.preferences });

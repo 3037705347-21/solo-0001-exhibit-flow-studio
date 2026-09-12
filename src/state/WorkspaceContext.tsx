@@ -1,9 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
 import { createId } from '../domain/ids';
+import {
+  buildCreationRevision,
+  buildStatusRevision,
+  confirmIssueMerge,
+  prepareIssueEdit,
+  validateIssueDraft,
+  type IssueEditInput,
+  type IssueMergePreview,
+} from '../domain/issueRevisions';
 import { analyzeJourney } from '../domain/journeyAnalysis';
+import { transitionIssue } from '../domain/transitions';
+import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, ReviewIssue, Snapshot, WorkspaceState } from '../domain/models';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -15,6 +25,14 @@ interface CommandResult<T = undefined> {
   message?: string;
 }
 
+export interface IssueEditResponse {
+  ok: boolean;
+  errors?: Record<string, string>;
+  message?: string;
+  issue?: ReviewIssue;
+  conflict?: { current: ReviewIssue; preview: IssueMergePreview };
+}
+
 interface WorkspaceContextValue {
   state: WorkspaceState;
   storageHealthy: boolean;
@@ -24,6 +42,8 @@ interface WorkspaceContextValue {
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
   addIssue: (draft: IssueDraft) => CommandResult;
+  saveIssueEdit: (input: IssueEditInput) => IssueEditResponse;
+  resolveIssueEditConflict: (input: IssueEditInput, decision: 'merge' | 'discard') => IssueEditResponse;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
@@ -85,33 +105,66 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addIssue = useCallback((draft: IssueDraft): CommandResult => {
-    if (!draft.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
-    if (draft.description.trim().length < 16) return { ok: false, errors: { description: 'Add at least 16 characters of context.' } };
-    if (!draft.owner.trim()) return { ok: false, errors: { owner: 'Assign an owner.' } };
+    const errors = validateIssueDraft(draft);
+    if (Object.keys(errors).length) return { ok: false, errors };
     const now = new Date().toISOString();
-    dispatch({
-      type: 'issue/add',
-      issue: {
-        id: createId('issue'),
-        title: draft.title.trim(),
-        description: draft.description.trim(),
-        severity: draft.severity,
-        status: 'open',
-        owner: draft.owner.trim(),
-        zoneId: draft.zoneId || undefined,
-        artifactId: draft.artifactId || undefined,
-        createdAt: now,
-        updatedAt: now,
-      },
-    });
+    const issue: ReviewIssue = {
+      id: createId('issue'),
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      severity: draft.severity,
+      status: 'open',
+      owner: draft.owner.trim(),
+      zoneId: draft.zoneId || undefined,
+      artifactId: draft.artifactId || undefined,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    dispatch({ type: 'issue/add', issue, revision: buildCreationRevision(issue) });
     return { ok: true };
   }, []);
+
+  const saveIssueEdit = useCallback((input: IssueEditInput): IssueEditResponse => {
+    const current = state.issues.find((candidate) => candidate.id === input.issueId);
+    const result = prepareIssueEdit(current, input);
+    switch (result.kind) {
+      case 'missing':
+        return { ok: false, message: 'The selected review finding no longer exists.' };
+      case 'invalid':
+        return { ok: false, errors: result.errors, message: 'Review the highlighted fields before saving.' };
+      case 'unchanged':
+        return { ok: false, message: 'No changes to save.' };
+      case 'conflict':
+        return { ok: false, conflict: { current: result.current, preview: result.preview } };
+      case 'committed':
+        dispatch({ type: 'issue/revise', issue: result.issue, revision: result.revision });
+        return { ok: true, issue: result.issue };
+    }
+  }, [state.issues]);
+
+  const resolveIssueEditConflict = useCallback((input: IssueEditInput, decision: 'merge' | 'discard'): IssueEditResponse => {
+    if (decision === 'discard') return { ok: true, message: 'Edit discarded; the latest stored values were kept.' };
+    const current = state.issues.find((candidate) => candidate.id === input.issueId);
+    const result = confirmIssueMerge(current, input);
+    switch (result.kind) {
+      case 'missing':
+        return { ok: false, message: 'The selected review finding no longer exists.' };
+      case 'unchanged':
+        return { ok: true, message: 'The latest version already includes these changes.' };
+      case 'committed':
+        dispatch({ type: 'issue/revise', issue: result.issue, revision: result.revision });
+        return { ok: true, issue: result.issue };
+    }
+  }, [state.issues]);
 
   const transitionReviewIssue = useCallback((issueId: string, status: IssueStatus): CommandResult => {
     const issue = state.issues.find((candidate) => candidate.id === issueId);
     if (!issue) return { ok: false, message: 'The selected review finding no longer exists.' };
     try {
-      dispatch({ type: 'issue/transition', issueId, status });
+      const next = transitionIssue(issue, status);
+      if (next === issue) return { ok: true };
+      dispatch({ type: 'issue/transition', issue: next, revision: buildStatusRevision(issue, next) });
       return { ok: true };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Status could not be changed.' };
@@ -147,12 +200,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     removePlacement,
     reorderArtifact,
     addIssue,
+    saveIssueEdit,
+    resolveIssueEditConflict,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, saveIssueEdit, resolveIssueEditConflict, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

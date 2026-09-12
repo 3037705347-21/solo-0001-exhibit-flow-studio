@@ -21,6 +21,7 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     && Array.isArray(candidate.artifacts)
     && Array.isArray(candidate.zones)
     && Array.isArray(candidate.issues)
+    && Array.isArray(candidate.issueHistory)
     && Boolean(candidate.preferences);
 }
 

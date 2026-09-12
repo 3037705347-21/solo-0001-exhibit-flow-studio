@@ -16,7 +16,8 @@ export function describeAction(action: WorkspaceAction): string {
     case 'placement/remove': return `Removed object from journey`;
     case 'placement/reorder': return `Changed object sequence`;
     case 'issue/add': return `Created finding ${action.issue.title}`;
-    case 'issue/transition': return `Moved finding to ${action.status}`;
+    case 'issue/revise': return `Revised finding ${action.issue.title} (v${action.issue.version})`;
+    case 'issue/transition': return `Moved finding to ${action.issue.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
     case 'workspace/reset': return 'Reset workspace to sample plan';

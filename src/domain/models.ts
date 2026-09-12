@@ -56,9 +56,33 @@ export interface ReviewIssue {
   zoneId?: string;
   artifactId?: string;
   owner: string;
+  version: number;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+
+export type IssueEditableField = 'title' | 'description' | 'severity' | 'owner' | 'zoneId' | 'artifactId';
+export type IssueRevisionField = IssueEditableField | 'status';
+
+export interface IssueFieldChange {
+  field: IssueRevisionField;
+  before: string;
+  after: string;
+}
+
+export type IssueRevisionKind = 'create' | 'edit' | 'merge' | 'status';
+
+export interface IssueRevision {
+  id: string;
+  issueId: string;
+  kind: IssueRevisionKind;
+  baseVersion: number;
+  resultVersion: number;
+  editor: string;
+  rationale: string;
+  changes: IssueFieldChange[];
+  committedAt: string;
 }
 
 export interface PlanningPreferences {
@@ -83,6 +107,7 @@ export interface WorkspaceState {
   artifacts: Artifact[];
   zones: Zone[];
   issues: ReviewIssue[];
+  issueHistory: IssueRevision[];
   preferences: PlanningPreferences;
   lastSavedAt?: string;
 }

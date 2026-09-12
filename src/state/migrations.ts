@@ -19,7 +19,8 @@ interface LegacyWorkspace {
   project?: WorkspaceState['project'];
   artifacts?: WorkspaceState['artifacts'];
   zones?: LegacyZone[];
-  issues?: WorkspaceState['issues'];
+  issues?: Array<Omit<WorkspaceState['issues'][number], 'version'> & { version?: number }>;
+  issueHistory?: WorkspaceState['issueHistory'];
   preferences?: WorkspaceState['preferences'];
   lastSavedAt?: string;
 }
@@ -32,12 +33,17 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     ...zone,
     sequence: typeof zone.sequence === 'number' ? zone.sequence : index,
   }));
+  const issues = source.issues.map((issue) => ({
+    ...issue,
+    version: typeof issue.version === 'number' ? issue.version : 1,
+  }));
   return {
     version: 1,
     project: source.project,
     artifacts: source.artifacts,
     zones,
-    issues: source.issues,
+    issues,
+    issueHistory: Array.isArray(source.issueHistory) ? source.issueHistory : [],
     preferences: source.preferences,
     lastSavedAt: source.lastSavedAt,
   };
