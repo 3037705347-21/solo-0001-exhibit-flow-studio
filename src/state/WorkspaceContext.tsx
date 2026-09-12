@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { createCollectionView, findViewNameConflict, isCollectionFilter, reviseLiveView } from '../domain/collectionViews';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
-import type { Artifact, ArtifactDraft, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
+import type { Artifact, ArtifactDraft, CollectionFilter, CollectionView, IssueDraft, IssueStatus, PlanningPreferences, ReadinessResult, Snapshot, WorkspaceState } from '../domain/models';
 import { workspaceReducer } from './reducer';
 import { loadWorkspace, saveWorkspace } from './persistence';
 import { createSeedWorkspace } from './seed';
@@ -28,6 +29,9 @@ interface WorkspaceContextValue {
   updatePreferences: (preferences: PlanningPreferences) => void;
   checkReadiness: () => ReadinessResult;
   createSnapshot: () => CommandResult<Snapshot>;
+  saveCollectionView: (name: string, kind: CollectionView['kind'], rules: CollectionFilter) => CommandResult<CollectionView>;
+  reviseCollectionView: (viewId: string, rules: CollectionFilter) => CommandResult<CollectionView>;
+  removeCollectionView: (viewId: string) => CommandResult;
   resetWorkspace: () => void;
 }
 
@@ -136,6 +140,59 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return { ok: true, value: buildSnapshot(state, analysis, readiness) };
   }, [state]);
 
+  const saveCollectionView = useCallback((name: string, kind: CollectionView['kind'], rules: CollectionFilter): CommandResult<CollectionView> => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return { ok: false, errors: { name: 'Give the saved view a name.' } };
+    }
+    if (trimmed.length > 60) {
+      return { ok: false, errors: { name: 'Name must be 60 characters or fewer.' } };
+    }
+    if (kind !== 'live' && kind !== 'frozen') {
+      return { ok: false, message: 'A saved view must be a live view or a frozen list.' };
+    }
+    if (!isCollectionFilter(rules)) {
+      return { ok: false, message: 'The filter rules are not valid.' };
+    }
+    const conflict = findViewNameConflict(state.collectionViews, trimmed);
+    if (conflict) {
+      return {
+        ok: false,
+        errors: { name: `A ${conflict.kind === 'live' ? 'live view' : 'frozen list'} named “${conflict.name}” already exists. Choose a unique name.` },
+      };
+    }
+    const view = createCollectionView({
+      id: createId('collection-view'),
+      name: trimmed,
+      kind,
+      rules,
+      artifacts: state.artifacts,
+      at: new Date().toISOString(),
+    });
+    dispatch({ type: 'collectionView/save', view });
+    return { ok: true, value: view };
+  }, [state.artifacts, state.collectionViews]);
+
+  const reviseCollectionView = useCallback((viewId: string, rules: CollectionFilter): CommandResult<CollectionView> => {
+    const view = state.collectionViews.find((candidate) => candidate.id === viewId);
+    if (!view) return { ok: false, message: 'The selected saved view no longer exists.' };
+    if (view.kind !== 'live') {
+      return { ok: false, message: 'A frozen list cannot be revised. Save the current rules as a new view instead.' };
+    }
+    if (!isCollectionFilter(rules)) return { ok: false, message: 'The filter rules are not valid.' };
+    const at = new Date().toISOString();
+    const revised = reviseLiveView(view, rules, state.artifacts, at);
+    dispatch({ type: 'collectionView/revise', viewId, rules, at });
+    return { ok: true, value: revised };
+  }, [state.artifacts, state.collectionViews]);
+
+  const removeCollectionView = useCallback((viewId: string): CommandResult => {
+    const view = state.collectionViews.find((candidate) => candidate.id === viewId);
+    if (!view) return { ok: false, message: 'The selected saved view no longer exists.' };
+    dispatch({ type: 'collectionView/remove', viewId });
+    return { ok: true };
+  }, [state.collectionViews]);
+
   const resetWorkspace = useCallback(() => dispatch({ type: 'workspace/reset', state: createSeedWorkspace() }), []);
 
   const value = useMemo<WorkspaceContextValue>(() => ({
@@ -151,8 +208,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     updatePreferences,
     checkReadiness,
     createSnapshot,
+    saveCollectionView,
+    reviseCollectionView,
+    removeCollectionView,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, saveCollectionView, reviseCollectionView, removeCollectionView, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

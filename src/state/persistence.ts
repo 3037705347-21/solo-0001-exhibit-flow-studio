@@ -1,9 +1,11 @@
-import type { IssueStatus, WorkspaceState } from '../domain/models';
+import { isCollectionFilter } from '../domain/collectionViews';
+import type { CollectionFilter, IssueStatus, WorkspaceState } from '../domain/models';
 import { createSeedWorkspace } from './seed';
 import { migrateWorkspace, validateReferences } from './migrations';
 
 export const STORAGE_KEY = 'exhibit-flow.workspace.v1';
 export const REVIEW_UI_KEY = 'exhibit-flow.review-ui.v1';
+export const COLLECTION_UI_KEY = 'exhibit-flow.collection-ui.v1';
 
 export interface ReviewUiState {
   zoneId: string;
@@ -21,8 +23,21 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     && Array.isArray(candidate.artifacts)
     && Array.isArray(candidate.zones)
     && Array.isArray(candidate.issues)
-    && Boolean(candidate.preferences);
+    && Boolean(candidate.preferences)
+    && Array.isArray(candidate.collectionViews);
 }
+
+export interface CollectionUiState {
+  /** Draft rules while browsing without a saved view ("ad hoc" scratch state). */
+  draft: CollectionFilter;
+  /** Selected saved view by id; kind comes from the stored view, never from UI state. */
+  selectedViewId: string | null;
+}
+
+const DEFAULT_COLLECTION_UI: CollectionUiState = {
+  draft: { query: '', roles: [], sensitivities: [], keyOnly: false },
+  selectedViewId: null,
+};
 
 export function loadWorkspace(storage: Pick<Storage, 'getItem'> = localStorage): WorkspaceState {
   try {
@@ -71,6 +86,39 @@ export function loadReviewUi(storage: Pick<Storage, 'getItem'> = localStorage): 
 export function saveReviewUi(ui: ReviewUiState, storage: Pick<Storage, 'setItem'> = localStorage): void {
   try {
     storage.setItem(REVIEW_UI_KEY, JSON.stringify(ui));
+  } catch {
+    // UI preferences are non-critical; ignore storage failures.
+  }
+}
+
+/**
+ * Restore the last collection UI state. The selected view id is accepted without
+ * a kind: the kind is resolved from the persisted view itself so an old UI state
+ * can never resurrect a frozen list under live semantics (or vice versa).
+ * Selection of a view that no longer exists is dropped on load.
+ */
+export function loadCollectionUi(storage: Pick<Storage, 'getItem'> = localStorage, existingViewIds: ReadonlySet<string> = new Set()): CollectionUiState {
+  try {
+    const raw = storage.getItem(COLLECTION_UI_KEY);
+    if (!raw) return DEFAULT_COLLECTION_UI;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return DEFAULT_COLLECTION_UI;
+    const candidate = parsed as Partial<CollectionUiState>;
+    if (!isCollectionFilter(candidate.draft)) return DEFAULT_COLLECTION_UI;
+    const selectedViewId = typeof candidate.selectedViewId === 'string'
+      && candidate.selectedViewId
+      && existingViewIds.has(candidate.selectedViewId)
+      ? candidate.selectedViewId
+      : null;
+    return { draft: candidate.draft, selectedViewId };
+  } catch {
+    return DEFAULT_COLLECTION_UI;
+  }
+}
+
+export function saveCollectionUi(ui: CollectionUiState, storage: Pick<Storage, 'setItem'> = localStorage): void {
+  try {
+    storage.setItem(COLLECTION_UI_KEY, JSON.stringify(ui));
   } catch {
     // UI preferences are non-critical; ignore storage failures.
   }

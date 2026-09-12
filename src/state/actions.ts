@@ -1,4 +1,4 @@
-import type { Artifact, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
+import type { Artifact, CollectionFilter, CollectionView, IssueStatus, PlanningPreferences, ReviewIssue, WorkspaceState } from '../domain/models';
 
 export type WorkspaceAction =
   | { type: 'artifact/upsert'; artifact: Artifact }
@@ -10,4 +10,7 @@ export type WorkspaceAction =
   | { type: 'issue/transition'; issueId: string; status: IssueStatus; at?: Date }
   | { type: 'preferences/update'; preferences: PlanningPreferences }
   | { type: 'project/readiness'; ready: boolean; checkedAt: string }
+  | { type: 'collectionView/save'; view: CollectionView }
+  | { type: 'collectionView/revise'; viewId: string; rules: CollectionFilter; at: string }
+  | { type: 'collectionView/remove'; viewId: string }
   | { type: 'workspace/reset'; state: WorkspaceState };

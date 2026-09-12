@@ -20,6 +20,9 @@ The application is a pure frontend project. It does not require accounts, a serv
 - `Placement`: the assignment of an artifact to a zone and a position in that zone.
 - `ReviewIssue`: a severity-ranked finding linked to a zone or artifact, with open, in-progress, or resolved state.
 - `Snapshot`: a frozen readiness summary used for local export and comparison.
+- `CollectionView`: a saved filter view with a distinct kind:
+  - a **live view** follows the collection; membership is recomputed from the current object set against its latest rule version, and every rule revision records its version number, member identity, and creation basis;
+  - a **frozen list** is issued material: it keeps the rule version and a snapshot of each member's accession ID, title, role, sensitivity, and key-object flag; membership never re-runs, and members are flagged `changed` or `missing` when the object drifts (role change, accession-ID correction) or is deleted. Newly matching objects are reported separately and never merge into the list.
 
 ## Workflows
 

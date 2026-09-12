@@ -1,4 +1,5 @@
-import type { WorkspaceState } from '../domain/models';
+import { isCollectionFilter } from '../domain/collectionViews';
+import type { CollectionRuleVersion, CollectionView, WorkspaceState } from '../domain/models';
 
 interface LegacyZone {
   id: string;
@@ -21,7 +22,76 @@ interface LegacyWorkspace {
   zones?: LegacyZone[];
   issues?: WorkspaceState['issues'];
   preferences?: WorkspaceState['preferences'];
+  collectionViews?: unknown;
   lastSavedAt?: string;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function sanitizeRuleVersion(value: unknown): CollectionRuleVersion | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<CollectionRuleVersion>;
+  if (typeof candidate.version !== 'number'
+    || !isCollectionFilter(candidate.rules)
+    || !isStringArray(candidate.memberIds)
+    || typeof candidate.basis !== 'string'
+    || typeof candidate.createdAt !== 'string') {
+    return null;
+  }
+  return {
+    version: candidate.version,
+    rules: candidate.rules,
+    memberIds: candidate.memberIds,
+    basis: candidate.basis,
+    createdAt: candidate.createdAt,
+  };
+}
+
+/**
+ * Recover saved views from older/partial storage. Frozen member references are
+ * deliberately left intact even when the referenced object is gone: the drift
+ * marker is the evidence that an issued list no longer matches the collection.
+ */
+export function sanitizeCollectionViews(value: unknown): CollectionView[] {
+  if (!Array.isArray(value)) return [];
+  const views: CollectionView[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const candidate = raw as Partial<CollectionView>;
+    if (typeof candidate.id !== 'string'
+      || typeof candidate.name !== 'string'
+      || (candidate.kind !== 'live' && candidate.kind !== 'frozen')
+      || typeof candidate.createdAt !== 'string'
+      || typeof candidate.updatedAt !== 'string'
+      || !Array.isArray(candidate.ruleVersions)) {
+      continue;
+    }
+    const ruleVersions = candidate.ruleVersions
+      .map((version) => sanitizeRuleVersion(version))
+      .filter((version): version is CollectionRuleVersion => Boolean(version))
+      .sort((left, right) => left.version - right.version);
+    if (!ruleVersions.length) continue;
+    const frozenMembers = candidate.kind === 'frozen' && Array.isArray(candidate.frozenMembers)
+      ? candidate.frozenMembers.filter((member) =>
+        member && typeof member === 'object'
+        && typeof member.artifactId === 'string'
+        && typeof member.accessionId === 'string'
+        && typeof member.title === 'string')
+      : undefined;
+    if (candidate.kind === 'frozen' && !frozenMembers?.length) continue;
+    views.push({
+      id: candidate.id,
+      name: candidate.name,
+      kind: candidate.kind,
+      createdAt: candidate.createdAt,
+      updatedAt: candidate.updatedAt,
+      ruleVersions,
+      ...(frozenMembers ? { frozenMembers } : {}),
+    });
+  }
+  return views;
 }
 
 export function migrateWorkspace(value: unknown): WorkspaceState | null {
@@ -39,6 +109,7 @@ export function migrateWorkspace(value: unknown): WorkspaceState | null {
     zones,
     issues: source.issues,
     preferences: source.preferences,
+    collectionViews: sanitizeCollectionViews(source.collectionViews),
     lastSavedAt: source.lastSavedAt,
   };
 }
@@ -54,5 +125,6 @@ export function validateReferences(state: WorkspaceState): WorkspaceState {
       zoneId: issue.zoneId && zoneIds.has(issue.zoneId) ? issue.zoneId : undefined,
       artifactId: issue.artifactId && artifactIds.has(issue.artifactId) ? issue.artifactId : undefined,
     })),
+    // Frozen list references are intentionally not pruned; deletion is surfaced as drift.
   };
 }

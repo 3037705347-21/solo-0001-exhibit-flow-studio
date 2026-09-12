@@ -67,6 +67,76 @@ export interface PlanningPreferences {
   groupSize: number;
 }
 
+export interface CollectionFilter {
+  query: string;
+  roles: string[];
+  sensitivities: string[];
+  keyOnly: boolean;
+}
+
+/**
+ * One immutable revision of a saved view's rule set. Every revision records the
+ * rule version number, the membership it produced (member identity), and the
+ * basis from which the rules were created ("创建依据").
+ */
+export interface CollectionRuleVersion {
+  version: number;
+  rules: CollectionFilter;
+  memberIds: string[];
+  basis: string;
+  createdAt: string;
+}
+
+/** Fields captured per member when a frozen list is issued; used to detect drift. */
+export interface FrozenMemberSnapshot {
+  artifactId: string;
+  accessionId: string;
+  title: string;
+  narrativeRole: NarrativeRole;
+  sensitivity: Sensitivity;
+  isKeyObject: boolean;
+}
+
+/**
+ * A saved collection view.
+ * - `live` views follow the collection: membership is always recomputed from
+ *   the current object set against the latest rule version.
+ * - `frozen` lists are issued material: membership never re-runs; the member
+ *   snapshots stay fixed and each member is flagged when the live object drifts.
+ */
+export interface CollectionView {
+  id: string;
+  name: string;
+  kind: 'live' | 'frozen';
+  createdAt: string;
+  updatedAt: string;
+  ruleVersions: CollectionRuleVersion[];
+  frozenMembers?: FrozenMemberSnapshot[];
+}
+
+export type FrozenMemberState =
+  | 'intact'
+  | 'changed'
+  | 'missing';
+
+export interface FrozenMemberEntry {
+  snapshot: FrozenMemberSnapshot;
+  current?: Artifact;
+  state: FrozenMemberState;
+  changedFields: Array<keyof FrozenMemberSnapshot>;
+}
+
+export interface FrozenViewEvaluation {
+  entries: FrozenMemberEntry[];
+  intactCount: number;
+  changedCount: number;
+  missingCount: number;
+  /** True when any issued member has drifted; the frozen list must not be treated as current evidence. */
+  isStale: boolean;
+  /** Objects now matching the rules that were not part of the issued list. Informational only. */
+  addedArtifacts: Artifact[];
+}
+
 export interface ExhibitProject {
   id: string;
   title: string;
@@ -84,6 +154,7 @@ export interface WorkspaceState {
   zones: Zone[];
   issues: ReviewIssue[];
   preferences: PlanningPreferences;
+  collectionViews: CollectionView[];
   lastSavedAt?: string;
 }
 

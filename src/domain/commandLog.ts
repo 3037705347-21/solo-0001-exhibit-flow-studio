@@ -19,6 +19,9 @@ export function describeAction(action: WorkspaceAction): string {
     case 'issue/transition': return `Moved finding to ${action.status}`;
     case 'preferences/update': return `Updated visitor profile`;
     case 'project/readiness': return action.ready ? 'Marked project ready' : 'Returned project to review';
+    case 'collectionView/save': return 'Saved a collection filter view';
+    case 'collectionView/revise': return 'Updated a live collection view to a new rule version';
+    case 'collectionView/remove': return 'Deleted a saved collection view';
     case 'workspace/reset': return 'Reset workspace to sample plan';
   }
 }

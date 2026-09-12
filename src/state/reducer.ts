@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { reviseLiveView } from '../domain/collectionViews';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -95,6 +96,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
           lastReadinessCheck: action.checkedAt,
         },
       });
+    case 'collectionView/save':
+      return { ...state, collectionViews: [...state.collectionViews, action.view] };
+    case 'collectionView/revise': {
+      const collectionViews = state.collectionViews.map((view) =>
+        view.id === action.viewId ? reviseLiveView(view, action.rules, state.artifacts, action.at) : view,
+      );
+      return { ...state, collectionViews };
+    }
+    case 'collectionView/remove':
+      return {
+        ...state,
+        collectionViews: state.collectionViews.filter((view) => view.id !== action.viewId),
+      };
     case 'workspace/reset':
       return action.state;
     default:

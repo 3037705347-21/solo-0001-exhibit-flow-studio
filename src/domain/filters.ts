@@ -1,6 +1,6 @@
-import type { Artifact, IssueSeverity, IssueStatus, ReviewIssue, Zone } from './models';
+import type { Artifact, CollectionFilter, IssueSeverity, IssueStatus, ReviewIssue, Zone } from './models';
 
-export interface CollectionFilter { query: string; roles: string[]; sensitivities: string[]; keyOnly: boolean; minDwell?: number; maxDwell?: number }
+export type { CollectionFilter } from './models';
 export interface IssueFilter { statuses: IssueStatus[]; severities: IssueSeverity[]; zoneId?: string; owner?: string }
 
 export function filterCollection(artifacts: Artifact[], filter: CollectionFilter): Artifact[] {
@@ -11,9 +11,7 @@ export function filterCollection(artifacts: Artifact[], filter: CollectionFilter
     const roleMatch = !filter.roles.length || filter.roles.includes(artifact.narrativeRole);
     const sensitivityMatch = !filter.sensitivities.length || filter.sensitivities.includes(artifact.sensitivity);
     const keyMatch = !filter.keyOnly || artifact.isKeyObject;
-    const minMatch = filter.minDwell === undefined || artifact.dwellMinutes >= filter.minDwell;
-    const maxMatch = filter.maxDwell === undefined || artifact.dwellMinutes <= filter.maxDwell;
-    return queryMatch && roleMatch && sensitivityMatch && keyMatch && minMatch && maxMatch;
+    return queryMatch && roleMatch && sensitivityMatch && keyMatch;
   });
 }
 
