@@ -1,14 +1,19 @@
+import { normalizeCollectionSort, type CollectionSort } from '../domain/collectionSort';
 import type { IssueStatus, WorkspaceState } from '../domain/models';
 import { createSeedWorkspace } from './seed';
 import { migrateWorkspace, validateReferences } from './migrations';
 
 export const STORAGE_KEY = 'exhibit-flow.workspace.v1';
 export const REVIEW_UI_KEY = 'exhibit-flow.review-ui.v1';
+export const COLLECTION_UI_KEY = 'exhibit-flow.collection-ui.v1';
 
 export interface ReviewUiState {
   zoneId: string;
   status: IssueStatus | 'all';
 }
+
+/** Sort preference only; search and filter inputs stay ephemeral. Never written into the workspace document. */
+export type CollectionUiState = CollectionSort;
 
 const DEFAULT_REVIEW_UI: ReviewUiState = { zoneId: '', status: 'all' };
 const ISSUE_STATUSES: Array<IssueStatus | 'all'> = ['all', 'open', 'in-progress', 'resolved'];
@@ -71,6 +76,24 @@ export function loadReviewUi(storage: Pick<Storage, 'getItem'> = localStorage): 
 export function saveReviewUi(ui: ReviewUiState, storage: Pick<Storage, 'setItem'> = localStorage): void {
   try {
     storage.setItem(REVIEW_UI_KEY, JSON.stringify(ui));
+  } catch {
+    // UI preferences are non-critical; ignore storage failures.
+  }
+}
+
+export function loadCollectionUi(storage: Pick<Storage, 'getItem'> = localStorage): CollectionUiState {
+  try {
+    const raw = storage.getItem(COLLECTION_UI_KEY);
+    if (!raw) return normalizeCollectionSort(null);
+    return normalizeCollectionSort(JSON.parse(raw));
+  } catch {
+    return normalizeCollectionSort(null);
+  }
+}
+
+export function saveCollectionUi(ui: CollectionUiState, storage: Pick<Storage, 'setItem'> = localStorage): void {
+  try {
+    storage.setItem(COLLECTION_UI_KEY, JSON.stringify(ui));
   } catch {
     // UI preferences are non-critical; ignore storage failures.
   }

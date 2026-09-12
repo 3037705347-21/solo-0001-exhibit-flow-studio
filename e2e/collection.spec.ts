@@ -15,3 +15,32 @@ test('curate object set through collection route', async ({ page }) => {
   await page.getByRole('button', { name: 'Add object' }).last().click();
   await expect(page.getByText('A New Material Memory')).toBeVisible();
 });
+
+test('sort the collection, keep order stable across filters, and restore sort after reload', async ({ page }) => {
+  await page.goto('/collection');
+  const titles = () => page.locator('.artifact-card h3').allTextContents();
+
+  // Default added order matches how objects entered the collection.
+  expect((await titles())[0]).toBe('Railway Signal Lantern');
+
+  // A deterministic title order replaces it.
+  await page.getByLabel('Sort objects by').selectOption('title');
+  expect((await titles())[0]).toBe('Conservator’s Gloves');
+
+  // Search and role filters only narrow the visible set.
+  await page.getByLabel('Search collection').fill('radio');
+  expect(await titles()).toEqual(['Kitchen Table Radio']);
+  await page.getByLabel('Search collection').fill('');
+  await page.getByRole('button', { name: 'Filters' }).click();
+  await page.getByLabel('Narrative role').selectOption('reflection');
+  expect(await titles()).toEqual(['Conservator’s Gloves', 'Mended Serving Bowl', 'Oral History Tape 12']);
+  await page.getByRole('button', { name: 'Clear filters' }).click();
+  const fullOrder = await titles();
+  expect(fullOrder).toHaveLength(8);
+  expect(fullOrder[0]).toBe('Conservator’s Gloves');
+
+  // The sort rule survives a page refresh.
+  await page.reload();
+  await expect(page.getByLabel('Sort objects by')).toHaveValue('title');
+  expect(await titles()).toEqual(fullOrder);
+});

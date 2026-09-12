@@ -1,3 +1,4 @@
+import { sortCollection, type CollectionSort } from './collectionSort';
 import type { Artifact, NarrativeRole } from './models';
 
 export interface CollectionFacet { label: string; value: string; count: number; color?: string }
@@ -57,13 +58,16 @@ export function searchArtifacts(artifacts: Artifact[], query: string): Artifact[
   });
 }
 
+/** Legacy alias kept for existing callers; ordering now follows the shared deterministic collection sort. */
 export function sortArtifacts(artifacts: Artifact[], sort: 'title' | 'dwell' | 'recent' | 'role'): Artifact[] {
-  return [...artifacts].sort((left, right) => {
-    if (sort === 'title') return left.title.localeCompare(right.title);
-    if (sort === 'dwell') return right.dwellMinutes - left.dwellMinutes;
-    if (sort === 'recent') return right.updatedAt.localeCompare(left.updatedAt);
-    return left.narrativeRole.localeCompare(right.narrativeRole) || left.title.localeCompare(right.title);
-  });
+  const mapped: CollectionSort = sort === 'title'
+    ? { key: 'title', direction: 'asc' }
+    : sort === 'dwell'
+      ? { key: 'dwellMinutes', direction: 'desc' }
+      : sort === 'recent'
+        ? { key: 'updatedAt', direction: 'desc' }
+        : { key: 'narrativeRole', direction: 'asc' };
+  return sortCollection(artifacts, mapped);
 }
 
 export function filterByAccessibility(artifacts: Artifact[], need: Artifact['accessibilityNeed'] | 'all'): Artifact[] {
