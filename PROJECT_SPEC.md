@@ -31,6 +31,8 @@ The user opens the collection view, searches and filters existing objects, adds 
 
 The user opens the journey view, assigns unplaced objects to zones, changes placement sequence, and moves objects between zones. The domain engine recalculates zone dwell time, density, narrative coverage, and accessibility constraints after every transition. A validation panel exposes blocking errors and warnings, and links findings back to affected zones.
 
+For larger queues, the user stages a batch placement transaction: each queued object is assigned a candidate zone, and the engine evaluates the whole set against object constraints, zone dwell capacity, object limits, key-object coverage, and narrative-role completeness. Before confirming, the user sees which candidates cannot be satisfied and which trade-offs (relocations, seating needs, near-capacity zones) need a human decision. Confirming applies the batch atomically — it never half-applies — and re-submitting the same transaction is an idempotent no-op.
+
 ### 3. Run a review to readiness
 
 The user opens the review view, creates a finding linked to an object or zone, moves it from open to in progress to resolved, and requests a readiness check. The readiness engine combines unresolved blockers, unplaced required objects, and journey validation results. A ready plan can produce a downloadable JSON snapshot; a blocked plan explains exactly what remains.
@@ -49,6 +51,7 @@ The user opens the insights view and adjusts the visitor pace and accessibility 
 - Objects marked as requiring seated interpretation must be placed in a zone with seating.
 - Required narrative roles must be represented in the journey before readiness.
 - Critical review issues block readiness until resolved.
+- Batch placements are evaluated as one transaction against a placement fingerprint: the batch applies in full or not at all, a stale fingerprint (concurrent journey change) rejects the commit, and replaying an applied batch changes nothing.
 - Scenario calculations are derived, cancellable UI state and never overwrite the saved plan unless explicitly applied.
 
 ## Modules and dependency direction

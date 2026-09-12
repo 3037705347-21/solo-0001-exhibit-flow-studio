@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react';
 import { artifactFromDraft, validateArtifactDraft } from '../domain/artifactValidation';
+import { evaluateBatchPlacement, type BatchPlacementEvaluation, type BatchPlacementPlan } from '../domain/batchPlacement';
 import { createId } from '../domain/ids';
 import { analyzeJourney } from '../domain/journeyAnalysis';
 import { buildSnapshot, evaluateReadiness } from '../domain/reviewRules';
@@ -23,6 +24,7 @@ interface WorkspaceContextValue {
   assignArtifact: (artifactId: string, zoneId: string) => CommandResult;
   removePlacement: (artifactId: string) => void;
   reorderArtifact: (zoneId: string, artifactId: string, direction: -1 | 1) => CommandResult;
+  commitBatchPlacement: (plan: BatchPlacementPlan) => CommandResult<BatchPlacementEvaluation>;
   addIssue: (draft: IssueDraft) => CommandResult;
   transitionReviewIssue: (issueId: string, status: IssueStatus) => CommandResult;
   updatePreferences: (preferences: PlanningPreferences) => void;
@@ -83,6 +85,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       return { ok: false, message: error instanceof Error ? error.message : 'Object sequence could not be changed.' };
     }
   }, []);
+
+  const commitBatchPlacement = useCallback((plan: BatchPlacementPlan): CommandResult<BatchPlacementEvaluation> => {
+    const evaluation = evaluateBatchPlacement(state, plan);
+    if (evaluation.alreadyApplied) {
+      return { ok: true, value: evaluation, message: 'Every candidate in this batch is already placed; nothing changed.' };
+    }
+    if (evaluation.stale) {
+      return { ok: false, value: evaluation, message: 'The journey changed since this batch was staged. Review the refreshed assessment.' };
+    }
+    if (!evaluation.canApply) {
+      return { ok: false, value: evaluation, message: 'Resolve the blocked candidates before applying this batch.' };
+    }
+    dispatch({
+      type: 'placement/batch',
+      transactionId: plan.transactionId,
+      baseFingerprint: plan.baseFingerprint,
+      candidates: plan.candidates,
+    });
+    return { ok: true, value: evaluation };
+  }, [state]);
 
   const addIssue = useCallback((draft: IssueDraft): CommandResult => {
     if (!draft.title.trim()) return { ok: false, errors: { title: 'A finding title is required.' } };
@@ -146,13 +168,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     assignArtifact,
     removePlacement,
     reorderArtifact,
+    commitBatchPlacement,
     addIssue,
     transitionReviewIssue,
     updatePreferences,
     checkReadiness,
     createSnapshot,
     resetWorkspace,
-  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
+  }), [state, storageHealthy, upsertArtifact, removeArtifact, assignArtifact, removePlacement, reorderArtifact, commitBatchPlacement, addIssue, transitionReviewIssue, updatePreferences, checkReadiness, createSnapshot, resetWorkspace]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

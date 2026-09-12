@@ -25,7 +25,7 @@ npm run check       # all checks in sequence
 - `src/domain`: entities, validation boundaries, journey analysis, state transitions, readiness, and scenario projection.
 - `src/state`: reducer commands, selectors, seed data, and local persistence.
 - `src/features/collection`: searchable object library and validated editor.
-- `src/features/journey`: sequenced zone lanes, placement commands, and constraint feedback.
+- `src/features/journey`: sequenced zone lanes, single and batch placement commands, and constraint feedback.
 - `src/features/review`: finding lifecycle, readiness gate, and snapshot export.
 - `src/features/insights`: non-mutating visitor scenario controls and derived metrics.
 - `src/components`: shared shell, navigation, forms, badges, metrics, dialogs, and visual primitives.
@@ -39,3 +39,5 @@ npm run check       # all checks in sequence
 ## Design notes
 
 State-changing feature actions call typed workspace commands. Commands validate at the boundary, dispatch reducer events, and persist the complete workspace. Derived analysis is pure and can be recalculated for scenario projections without changing the saved plan.
+
+Batch placement is a single transaction: the journey view's **Batch place** action stages candidate zone assignments for the unplaced queue, evaluates the whole set (constraints, capacity, object limits, key objects, role coverage) before confirmation, surfaces blocked candidates and trade-offs for a human decision, and then applies the batch atomically. The commit is guarded by a placement fingerprint, so a journey change after staging rejects the batch, and re-submitting an applied batch is a no-op.

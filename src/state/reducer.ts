@@ -1,4 +1,5 @@
 import { regressReadyProject, transitionIssue } from '../domain/transitions';
+import { applyPlacementCandidates, placementFingerprint } from '../domain/batchPlacement';
 import type { WorkspaceState } from '../domain/models';
 import type { WorkspaceAction } from './actions';
 
@@ -75,6 +76,19 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       return stamp(regressReadyProject(removeArtifactFromZones(state, action.artifactId)));
     case 'placement/reorder':
       return stamp(regressReadyProject(reorderArtifact(state, action.zoneId, action.artifactId, action.direction)));
+    case 'placement/batch': {
+      // All-or-nothing: any invalid candidate throws before a new state is
+      // produced, so a failed batch leaves the workspace untouched.
+      const next = applyPlacementCandidates(state, action.candidates);
+      if (placementFingerprint(next) === placementFingerprint(state)) {
+        // Idempotent replay: every candidate is already satisfied.
+        return state;
+      }
+      if (action.baseFingerprint !== placementFingerprint(state)) {
+        throw new Error('The journey changed since this batch was prepared. Re-evaluate the batch before applying it.');
+      }
+      return stamp(regressReadyProject(next));
+    }
     case 'issue/add':
       return stamp(regressReadyProject({ ...state, issues: [action.issue, ...state.issues] }));
     case 'issue/transition':
